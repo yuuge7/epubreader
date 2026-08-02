@@ -27,8 +27,10 @@ android {
         applicationId = "com.ebookreader"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        // versionCode must increase for every published build; versionName drives the
+        // release tag and title (see .github/workflows/release.yml).
+        versionCode = 2
+        versionName = "1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -67,6 +69,8 @@ android {
 
     buildFeatures {
         compose = true
+        // Exposes VERSION_NAME so the About screen cannot drift from the real version.
+        buildConfig = true
     }
 
     composeOptions {

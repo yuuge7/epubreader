@@ -146,15 +146,14 @@ keytool -genkeypair -v -keystore epubreader-release.jks -storetype PKCS12 \
 
 `.github/workflows/release.yml` runs on every push to `main`: it reads `versionName` from `app/build.gradle.kts`, and if no tag `v<versionName>` exists yet it builds a signed release APK and publishes it as **EBook Reader v<versionName>**.
 
-To cut a release, bump the version and push:
+To cut a release, bump both values in `app/build.gradle.kts` and push to `main`:
 
 ```kotlin
-// app/build.gradle.kts
-versionCode = 2
-versionName = "1.1"
+versionCode = 3        // must increase for every published build
+versionName = "1.2"    // becomes tag v1.2 and title "EBook Reader v1.2"
 ```
 
-Pushes that do not change `versionName` build and then skip publishing, so routine commits never fail.
+Pushes that do not change `versionName` build and then skip publishing, so routine commits never fail. The About screen reads `versionName` from `BuildConfig`, so it never needs a manual edit.
 
 **Required repository secrets** (Settings → Secrets and variables → Actions):
 

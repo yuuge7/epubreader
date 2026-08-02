@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ebookreader.BuildConfig
 import com.ebookreader.domain.model.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -136,7 +137,11 @@ fun SettingsScreen(
 
             // ── About ─────────────────────────────────────────────────────
             SettingsSectionHeader("About", Icons.Default.Info)
-            SettingsInfoItem("EBook Reader", "Version 1.0.0", Icons.Default.AutoStories)
+            SettingsInfoItem(
+                "EBook Reader",
+                "Version ${BuildConfig.VERSION_NAME}",
+                Icons.Default.AutoStories
+            )
             SettingsInfoItem("Supported Formats", "PDF, EPUB", Icons.Default.Description)
 
             Spacer(Modifier.height(32.dp))
