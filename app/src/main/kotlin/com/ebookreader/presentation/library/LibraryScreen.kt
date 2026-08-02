@@ -39,6 +39,8 @@ fun LibraryScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToStats: () -> Unit,
     onOpenBook: (Book) -> Unit,
+    pendingImportUri: Uri? = null,
+    onPendingImportHandled: () -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -47,6 +49,21 @@ fun LibraryScreen(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? ->
         uri?.let { viewModel.importBook(it) }
+    }
+
+    // A file handed to us by another app ("Open with"): import it, then open it.
+    LaunchedEffect(pendingImportUri) {
+        pendingImportUri?.let {
+            viewModel.importAndOpen(it)
+            onPendingImportHandled()
+        }
+    }
+
+    LaunchedEffect(uiState.bookToOpen) {
+        uiState.bookToOpen?.let { book ->
+            onOpenBook(book)
+            viewModel.consumeBookToOpen()
+        }
     }
 
     var showSortMenu by remember { mutableStateOf(value = false) }

@@ -1,5 +1,6 @@
 package com.ebookreader.presentation
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ebookreader.domain.model.AppSettings
@@ -11,7 +12,9 @@ import javax.inject.Inject
 
 data class MainUiState(
     val settings: AppSettings = AppSettings(),
-    val startDestination: String? = null // null = loading
+    val startDestination: String? = null, // null = loading
+    /** File passed in by another app via ACTION_VIEW, waiting to be imported. */
+    val pendingImportUri: Uri? = null
 )
 
 @HiltViewModel
@@ -43,4 +46,9 @@ class MainViewModel @Inject constructor(
             settingsRepository.updateSettings(settings)
         }
     }
+
+    fun onFileOpenedFromOutside(uri: Uri) =
+        _uiState.update { it.copy(pendingImportUri = uri) }
+
+    fun consumePendingImport() = _uiState.update { it.copy(pendingImportUri = null) }
 }

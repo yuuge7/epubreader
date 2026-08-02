@@ -1,5 +1,6 @@
 package com.ebookreader.presentation
 
+import android.net.Uri
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
@@ -23,7 +24,9 @@ fun AppNavigation(
     navController: NavHostController,
     startDestination: String,
     settings: AppSettings,
-    onSettingsChange: (AppSettings) -> Unit
+    onSettingsChange: (AppSettings) -> Unit,
+    pendingImportUri: Uri? = null,
+    onPendingImportHandled: () -> Unit = {}
 ) {
     NavHost(
         navController = navController,
@@ -69,6 +72,8 @@ fun AppNavigation(
                 onSettingsChange = onSettingsChange,
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                 onNavigateToStats = { navController.navigate(Screen.Stats.route) },
+                pendingImportUri = pendingImportUri,
+                onPendingImportHandled = onPendingImportHandled,
                 onOpenBook = { book ->
                     if (book.format.name == "PDF") {
                         navController.navigate(Screen.PdfReader.createRoute(book.id))

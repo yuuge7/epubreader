@@ -45,8 +45,51 @@ interface BookDao {
     @Delete
     suspend fun deleteBook(book: BookEntity)
 
-    @Query("UPDATE books SET currentPage = :page, lastRead = :timestamp, readingStatus = :status WHERE id = :bookId")
-    suspend fun updateReadingProgress(bookId: Long, page: Int, timestamp: Long, status: String)
+    /**
+     * Persists the reading position. Status becomes READING, except for a book already
+     * marked FINISHED that is still sitting on its last page — re-opening a finished book
+     * to glance at the ending must not silently un-finish it.
+     */
+    @Query(
+        """
+        UPDATE books
+        SET currentPage = :page,
+            scrollFraction = :scrollFraction,
+            lastRead = :timestamp,
+            readingStatus = CASE
+                WHEN readingStatus = 'FINISHED' AND :page >= :lastPageIndex THEN 'FINISHED'
+                ELSE 'READING'
+            END
+        WHERE id = :bookId
+        """
+    )
+    suspend fun updateReadingPosition(
+        bookId: Long,
+        page: Int,
+        scrollFraction: Float,
+        lastPageIndex: Int,
+        timestamp: Long
+    )
+
+    @Query(
+        """
+        UPDATE books
+        SET currentPage = :page, scrollFraction = 1.0, lastRead = :timestamp,
+            readingStatus = 'FINISHED'
+        WHERE id = :bookId
+        """
+    )
+    suspend fun markFinished(bookId: Long, page: Int, timestamp: Long)
+
+    @Query(
+        """
+        UPDATE books
+        SET currentPage = 0, scrollFraction = 0, lastRead = NULL,
+            readingStatus = 'NOT_STARTED'
+        WHERE id = :bookId
+        """
+    )
+    suspend fun resetProgress(bookId: Long)
 
     @Query("UPDATE books SET isFavorite = :isFavorite WHERE id = :bookId")
     suspend fun updateFavorite(bookId: Long, isFavorite: Boolean)

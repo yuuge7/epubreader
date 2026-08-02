@@ -14,7 +14,21 @@ interface BookRepository {
     suspend fun insertBook(book: Book): Long
     suspend fun updateBook(book: Book)
     suspend fun deleteBook(book: Book)
-    suspend fun updateReadingProgress(bookId: Long, page: Int, totalPages: Int)
+    /**
+     * Saves where the reader is. [scrollFraction] is the position inside [page]
+     * (0f top, 1f bottom) and is only meaningful for EPUB.
+     *
+     * This never marks a book FINISHED on its own — call [markBookFinished] for that.
+     */
+    suspend fun updateReadingProgress(
+        bookId: Long,
+        page: Int,
+        totalPages: Int,
+        scrollFraction: Float = 0f
+    )
+
+    suspend fun markBookFinished(bookId: Long, totalPages: Int)
+    suspend fun resetReadingProgress(bookId: Long)
     suspend fun updateFavorite(bookId: Long, isFavorite: Boolean)
 
     fun getBookmarksForBook(bookId: Long): Flow<List<Bookmark>>

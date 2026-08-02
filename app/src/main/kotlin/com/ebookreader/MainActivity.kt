@@ -1,5 +1,6 @@
 package com.ebookreader
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -25,6 +26,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        handleViewIntent(intent)
 
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -51,12 +53,36 @@ class MainActivity : ComponentActivity() {
                             navController = navController,
                             startDestination = startDestination,
                             settings = uiState.settings,
-                            onSettingsChange = viewModel::updateSettings
+                            onSettingsChange = viewModel::updateSettings,
+                            pendingImportUri = uiState.pendingImportUri,
+                            onPendingImportHandled = viewModel::consumePendingImport
                         )
                     }
                     // else: show nothing while loading (brief splash)
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleViewIntent(intent)
+    }
+
+    /**
+     * The manifest advertises PDF/EPUB VIEW filters, so files can be sent here from a
+     * file manager. Without this the app simply opened the library and ignored them.
+     */
+    private fun handleViewIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        val uri = intent.data ?: return
+        try {
+            // Keep read access alive past this activity instance where possible.
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: SecurityException) {
+            // Not a persistable grant — the one-shot permission is enough to import now.
+        }
+        viewModel.onFileOpenedFromOutside(uri)
     }
 }

@@ -16,6 +16,8 @@ data class Book(
     val coverPath: String? = null,
     val totalPages: Int = 0,
     val currentPage: Int = 0,
+    /** Scroll position inside [currentPage]: 0f = top of page/chapter, 1f = bottom. */
+    val scrollFraction: Float = 0f,
     val isFavorite: Boolean = false,
     val readingStatus: ReadingStatus = ReadingStatus.NOT_STARTED,
     val dateAdded: Date = Date(),
@@ -27,8 +29,11 @@ data class Book(
         get() = when {
             readingStatus == ReadingStatus.FINISHED -> 1f
             readingStatus == ReadingStatus.NOT_STARTED -> 0f
-            totalPages > 0 -> ((currentPage + 1).toFloat() / totalPages).coerceIn(0f, 1f)
-            else -> 0f
+            totalPages <= 0 -> 0f
+            // PDF: a page you are on counts as reached, so page 1/100 = 1%.
+            format == BookFormat.PDF -> ((currentPage + 1).toFloat() / totalPages).coerceIn(0f, 1f)
+            // EPUB: chapter index + how far into that chapter you scrolled.
+            else -> ((currentPage + scrollFraction) / totalPages).coerceIn(0f, 1f)
         }
 
     val formattedReadingTime: String

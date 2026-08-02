@@ -9,7 +9,6 @@ import com.ebookreader.data.local.entity.ReadingSessionEntity
 import com.ebookreader.domain.model.*
 import com.ebookreader.domain.repository.BookRepository
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import java.util.Date
 import javax.inject.Inject
@@ -70,16 +69,33 @@ class BookRepositoryImpl @Inject constructor(
     override suspend fun deleteBook(book: Book) =
         bookDao.deleteBook(BookEntity.fromDomain(book))
 
-    override suspend fun updateReadingProgress(bookId: Long, page: Int, totalPages: Int) {
-        val status = when {
-            totalPages > 0 && page >= totalPages - 1 -> ReadingStatus.FINISHED
-            else -> ReadingStatus.READING
-        }
-        bookDao.updateReadingProgress(bookId, page, Date().time, status.name)
+    override suspend fun updateReadingProgress(
+        bookId: Long,
+        page: Int,
+        totalPages: Int,
+        scrollFraction: Float
+    ) {
+        bookDao.updateReadingPosition(
+            bookId = bookId,
+            page = page.coerceAtLeast(0),
+            scrollFraction = scrollFraction.coerceIn(0f, 1f),
+            lastPageIndex = (totalPages - 1).coerceAtLeast(0),
+            timestamp = Date().time
+        )
         if (totalPages > 0) {
             bookDao.updateTotalPages(bookId, totalPages)
         }
     }
+
+    override suspend fun markBookFinished(bookId: Long, totalPages: Int) {
+        val lastPage = (totalPages - 1).coerceAtLeast(0)
+        bookDao.markFinished(bookId, lastPage, Date().time)
+        if (totalPages > 0) {
+            bookDao.updateTotalPages(bookId, totalPages)
+        }
+    }
+
+    override suspend fun resetReadingProgress(bookId: Long) = bookDao.resetProgress(bookId)
 
     override suspend fun updateFavorite(bookId: Long, isFavorite: Boolean) =
         bookDao.updateFavorite(bookId, isFavorite)
@@ -103,28 +119,28 @@ class BookRepositoryImpl @Inject constructor(
         if (seconds > 0) {
             bookDao.addReadingSeconds(bookId, seconds)
             readingSessionDao.insertSession(
-                ReadingSessionEntity(bookId = bookId, durationSeconds = seconds)
+                ReadingSessionEntity(
+                    bookId = bookId,
+                    // Snapshot the title so the session survives the book being removed.
+                    bookTitle = bookDao.getBookById(bookId)?.title ?: "Unknown Book",
+                    durationSeconds = seconds
+                )
             )
         }
     }
 
-    override fun getAllReadingSessions(): Flow<List<ReadingSession>> {
-        return combine(
-            readingSessionDao.getAllSessions(),
-            bookDao.getAllBooks()
-        ) { sessions, books ->
-            val bookMap = books.associateBy { it.id }
+    override fun getAllReadingSessions(): Flow<List<ReadingSession>> =
+        readingSessionDao.getAllSessions().map { sessions ->
             sessions.map { entity ->
                 ReadingSession(
                     id = entity.id,
                     bookId = entity.bookId,
-                    bookTitle = bookMap[entity.bookId]?.title ?: "Unknown Book",
+                    bookTitle = entity.bookTitle.ifBlank { "Unknown Book" },
                     durationSeconds = entity.durationSeconds,
                     timestamp = Date(entity.timestamp)
                 )
             }
         }
-    }
 
     override fun getReadingTimeInRange(startTime: Long, endTime: Long): Flow<Long> =
         readingSessionDao.getReadingTimeInRange(startTime, endTime).map { it ?: 0L }

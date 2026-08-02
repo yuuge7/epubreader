@@ -24,13 +24,19 @@ class EpubParser @Inject constructor(private val context: Context) {
 
     fun parseAndExtract(filePath: String): EpubParseResult {
         val epubFile = File(filePath)
-        val extractDir = File(context.cacheDir, "epub_${epubFile.nameWithoutExtension}")
+        val extractDir = extractDirFor(epubFile)
 
         if (!extractDir.exists() || extractDir.listFiles()?.isEmpty() == true) {
             extractDir.mkdirs()
+            val extractRoot = extractDir.canonicalFile
             ZipFile(epubFile).use { zip ->
                 zip.entries().asSequence().forEach { entry ->
                     val out = File(extractDir, entry.name)
+                    // Zip Slip guard: an entry named "../../databases/x" must not be able
+                    // to write outside the extraction directory.
+                    if (!out.canonicalFile.toPath().startsWith(extractRoot.toPath())) {
+                        return@forEach
+                    }
                     if (entry.isDirectory) out.mkdirs()
                     else {
                         out.parentFile?.mkdirs()
@@ -202,7 +208,36 @@ class EpubParser @Inject constructor(private val context: Context) {
         else "<html><head>$style</head><body>$html</body></html>"
     }
 
+    /**
+     * Cache directory for an EPUB. Keyed by the full path, not just the file name —
+     * two different books both called "book.epub" used to share one extraction and
+     * show each other's contents.
+     */
+    private fun extractDirFor(epubFile: File): File {
+        val key = epubFile.absolutePath.hashCode().toUInt().toString(16)
+        val safeName = epubFile.nameWithoutExtension.take(40).replace(Regex("[^A-Za-z0-9._-]"), "_")
+        return File(context.cacheDir, "epub_${safeName}_$key")
+    }
+
+    /** Title/author/cover without extracting chapter contents — used at import time. */
+    fun readMetadata(filePath: String): EpubMetadata? = try {
+        val result = parseAndExtract(filePath)
+        EpubMetadata(
+            title = result.book.title,
+            author = result.book.author,
+            coverImagePath = result.book.coverImagePath?.takeIf { File(it).exists() }
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+    data class EpubMetadata(
+        val title: String,
+        val author: String,
+        val coverImagePath: String?
+    )
+
     fun clearCache(filePath: String) {
-        File(context.cacheDir, "epub_${File(filePath).nameWithoutExtension}").deleteRecursively()
+        extractDirFor(File(filePath)).deleteRecursively()
     }
 }

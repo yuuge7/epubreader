@@ -3,16 +3,18 @@ package com.ebookreader.presentation.reader.epub
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ebookreader.data.epub.EpubParser
+import com.ebookreader.di.ApplicationScope
 import com.ebookreader.domain.model.Bookmark
-import com.ebookreader.domain.model.EpubBook
 import com.ebookreader.domain.model.EpubChapter
+import com.ebookreader.domain.model.ReadingSessionTracker
+import com.ebookreader.domain.model.ReadingStatus
 import com.ebookreader.domain.repository.BookRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.File
 import javax.inject.Inject
 
 data class EpubReaderUiState(
@@ -22,6 +24,8 @@ data class EpubReaderUiState(
     val currentChapterHtml: String = "",
     val currentChapterBaseUrl: String = "",
     val pendingScrollAnchor: String? = null,
+    /** Where to scroll once the chapter has rendered (0f..1f), null = leave at top. */
+    val pendingRestoreFraction: Float? = null,
     val isLoading: Boolean = true,
     val error: String? = null,
     val bookmarks: List<Bookmark> = emptyList(),
@@ -33,6 +37,7 @@ data class EpubReaderUiState(
     val bookmarkNote: String = "",
     val totalChapters: Int = 0,
     val fontSize: Float = 16f,
+    val isFinished: Boolean = false,
     // Combined progress: (chapterIndex + inChapterScrollFraction) / totalChapters
     val overallReadingProgress: Float = 0f,
     val totalReadingSeconds: Long = 0L
@@ -41,21 +46,34 @@ data class EpubReaderUiState(
 @HiltViewModel
 class EpubReaderViewModel @Inject constructor(
     private val bookRepository: BookRepository,
-    private val epubParser: EpubParser
+    private val epubParser: EpubParser,
+    @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
+
+    private companion object {
+        /** Don't hit the DB on every scroll callback. */
+        const val POSITION_SAVE_INTERVAL_MS = 2_000L
+        /** Scrolled this far into the final chapter counts as "read to the end". */
+        const val END_OF_BOOK_FRACTION = 0.98f
+    }
 
     private val _uiState = MutableStateFlow(EpubReaderUiState())
     val uiState: StateFlow<EpubReaderUiState> = _uiState.asStateFlow()
 
+    private val sessionTracker = ReadingSessionTracker()
+
     private var bookId: Long = -1L
-    private var sessionStartMs: Long = 0L
     private var chapterContents: Map<String, String> = emptyMap()
     private var chapterBaseUrls: Map<String, String> = emptyMap()
     private var opfDirPath: String = ""
 
+    private var currentScrollFraction: Float = 0f
+    private var lastPositionSaveMs: Long = 0L
+    private var isBookLoaded: Boolean = false
+
     fun loadBook(id: Long, fontSize: Float) {
+        if (bookId == id && isBookLoaded) return
         bookId = id
-        sessionStartMs = System.currentTimeMillis()
         _uiState.update { it.copy(fontSize = fontSize) }
         viewModelScope.launch {
             val book = bookRepository.getBookById(id) ?: run {
@@ -73,6 +91,7 @@ class EpubReaderViewModel @Inject constructor(
                 val savedPage = book.currentPage.coerceIn(
                     0, (result.book.chapters.size - 1).coerceAtLeast(0)
                 )
+                val savedFraction = book.scrollFraction.coerceIn(0f, 1f)
                 _uiState.update {
                     it.copy(
                         bookTitle = result.book.title,
@@ -80,10 +99,13 @@ class EpubReaderViewModel @Inject constructor(
                         totalChapters = result.book.chapters.size,
                         currentChapterIndex = savedPage,
                         isLoading = false,
+                        isFinished = book.readingStatus == ReadingStatus.FINISHED,
                         totalReadingSeconds = book.totalReadingSeconds
                     )
                 }
-                loadChapterContent(savedPage)
+                isBookLoaded = true
+                // Resume exactly where the reader left off: chapter *and* offset in it.
+                loadChapterContent(savedPage, restoreFraction = savedFraction)
                 loadBookmarks()
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = "Failed to open EPUB: ${e.message}", isLoading = false) }
@@ -91,7 +113,7 @@ class EpubReaderViewModel @Inject constructor(
         }
     }
 
-    private fun loadChapterContent(chapterIndex: Int) {
+    private fun loadChapterContent(chapterIndex: Int, restoreFraction: Float = 0f) {
         val chapters = _uiState.value.chapters
         if (chapterIndex < 0 || chapterIndex >= chapters.size) return
         val chapter = chapters[chapterIndex]
@@ -99,7 +121,9 @@ class EpubReaderViewModel @Inject constructor(
             ?: "<html><body><p>Chapter content unavailable.</p></body></html>"
         val baseUrl = chapterBaseUrls[chapter.id] ?: "file://$opfDirPath/"
         val styledHtml = applyFontSize(html, _uiState.value.fontSize)
-        val seedProgress = chapterIndex.toFloat() /
+        val fraction = restoreFraction.coerceIn(0f, 1f)
+        currentScrollFraction = fraction
+        val seedProgress = (chapterIndex + fraction) /
             _uiState.value.totalChapters.coerceAtLeast(1).toFloat()
         _uiState.update {
             it.copy(
@@ -107,24 +131,51 @@ class EpubReaderViewModel @Inject constructor(
                 currentChapterHtml = styledHtml,
                 currentChapterBaseUrl = baseUrl,
                 pendingScrollAnchor = null,
+                pendingRestoreFraction = fraction.takeIf { f -> f > 0.001f },
                 overallReadingProgress = seedProgress
             )
         }
-        viewModelScope.launch {
-            bookRepository.updateReadingProgress(bookId, chapterIndex, chapters.size)
-            checkChapterBookmarked(chapterIndex)
+        savePosition(force = true)
+        viewModelScope.launch { checkChapterBookmarked(chapterIndex) }
+    }
+
+    /**
+     * Called by the WebView JS bridge when the user scrolls within a chapter.
+     * [fraction] is 0.0 (top) to 1.0 (bottom) of the chapter content.
+     */
+    fun updateScrollProgress(fraction: Float) {
+        if (!isBookLoaded) return
+        val f = fraction.coerceIn(0f, 1f)
+        currentScrollFraction = f
+        val total = _uiState.value.totalChapters.coerceAtLeast(1).toFloat()
+        val chapterIdx = _uiState.value.currentChapterIndex.toFloat()
+        _uiState.update { it.copy(overallReadingProgress = (chapterIdx + f) / total) }
+        savePosition()
+
+        val isLastChapter = _uiState.value.currentChapterIndex >= _uiState.value.totalChapters - 1
+        if (isLastChapter && f >= END_OF_BOOK_FRACTION && !_uiState.value.isFinished) {
+            markAsFinished(jumpToEnd = false)
         }
     }
 
     /**
-     * Called by WebView JS bridge when the user scrolls within a chapter.
-     * [fraction] is 0.0 (top) to 1.0 (bottom) of the chapter content.
+     * Writes the reading position. Throttled, because the WebView reports scrolling
+     * dozens of times per second; [force] bypasses the throttle for chapter changes
+     * and for leaving the screen.
      */
-    fun updateScrollProgress(fraction: Float) {
-        val total = _uiState.value.totalChapters.coerceAtLeast(1).toFloat()
-        val chapterIdx = _uiState.value.currentChapterIndex.toFloat()
-        val overall = (chapterIdx + fraction.coerceIn(0f, 1f)) / total
-        _uiState.update { it.copy(overallReadingProgress = overall) }
+    private fun savePosition(force: Boolean = false) {
+        if (!isBookLoaded || bookId <= 0L) return
+        val now = System.currentTimeMillis()
+        if (!force && now - lastPositionSaveMs < POSITION_SAVE_INTERVAL_MS) return
+        lastPositionSaveMs = now
+
+        val page = _uiState.value.currentChapterIndex
+        val total = _uiState.value.totalChapters
+        val fraction = currentScrollFraction
+        // appScope: this must still complete when the screen is being torn down.
+        appScope.launch {
+            bookRepository.updateReadingProgress(bookId, page, total, fraction)
+        }
     }
 
     /**
@@ -141,15 +192,18 @@ class EpubReaderViewModel @Inject constructor(
         if (index >= 0) {
             loadChapterContent(index)
             if (fragment != null) {
-                _uiState.update { it.copy(pendingScrollAnchor = fragment) }
+                // Applied by the screen once the new document has finished loading.
+                _uiState.update { it.copy(pendingScrollAnchor = fragment, pendingRestoreFraction = null) }
             }
         }
     }
 
     fun clearPendingAnchor() = _uiState.update { it.copy(pendingScrollAnchor = null) }
+    fun clearPendingRestore() = _uiState.update { it.copy(pendingRestoreFraction = null) }
 
     fun navigateToChapter(index: Int) {
-        loadChapterContent(index.coerceIn(0, (_uiState.value.totalChapters - 1).coerceAtLeast(0)))
+        val target = index.coerceIn(0, (_uiState.value.totalChapters - 1).coerceAtLeast(0))
+        if (target != _uiState.value.currentChapterIndex) loadChapterContent(target)
         _uiState.update { it.copy(showTocSheet = false) }
     }
 
@@ -210,12 +264,23 @@ class EpubReaderViewModel @Inject constructor(
     }
 
     fun updateFontSize(fontSize: Float) {
+        if (fontSize == _uiState.value.fontSize) return
         _uiState.update { it.copy(fontSize = fontSize) }
-        loadChapterContent(_uiState.value.currentChapterIndex)
+        // Re-render the chapter, but come back to the same place in it.
+        loadChapterContent(_uiState.value.currentChapterIndex, currentScrollFraction)
     }
 
     private fun applyFontSize(html: String, fontSize: Float): String {
-        val style = "<style id=\"reader-font-override\">body { font-size: ${fontSize.toInt()}px !important; }</style>"
+        // Publisher stylesheets nearly always set font-size on p/div/span, which beats a
+        // rule on <body> alone — hence the descendant selector.
+        val style = """
+            <style id="reader-font-override">
+                body { font-size: ${fontSize.toInt()}px !important; }
+                body *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6) {
+                    font-size: inherit !important;
+                }
+            </style>
+        """.trimIndent()
         return if (html.contains("<head>", ignoreCase = true))
             html.replace(Regex("<head>", RegexOption.IGNORE_CASE), "<head>\n$style")
         else "<html><head>$style</head><body>$html</body></html>"
@@ -228,24 +293,15 @@ class EpubReaderViewModel @Inject constructor(
         }
     }
 
-    fun markAsFinished() {
-        viewModelScope.launch {
-            val total = _uiState.value.totalChapters.coerceAtLeast(1)
-            bookRepository.updateReadingProgress(bookId, total - 1, total)
-            _uiState.update { it.copy(
-                currentChapterIndex = total - 1,
-                overallReadingProgress = 1f
-            )}
-        }
-    }
-
-    /** Save accumulated reading time for this session */
-    fun saveSessionTime() {
-        val elapsed = (System.currentTimeMillis() - sessionStartMs) / 1000L
-        if (elapsed > 5) {
-            viewModelScope.launch {
-                bookRepository.addReadingSeconds(bookId, elapsed)
-            }
+    fun markAsFinished(jumpToEnd: Boolean = true) {
+        val total = _uiState.value.totalChapters.coerceAtLeast(1)
+        val lastIndex = total - 1
+        appScope.launch { bookRepository.markBookFinished(bookId, total) }
+        _uiState.update { it.copy(isFinished = true, overallReadingProgress = 1f) }
+        // Tapping "finished" from anywhere in the book must also *show* the ending,
+        // otherwise the title bar and the page disagree.
+        if (jumpToEnd && _uiState.value.currentChapterIndex != lastIndex) {
+            loadChapterContent(lastIndex)
         }
     }
 
@@ -255,9 +311,28 @@ class EpubReaderViewModel @Inject constructor(
         }
     }
 
+    // ── Session time ─────────────────────────────────────────────────────────
+
+    fun onScreenResumed() = sessionTracker.resume()
+
+    /** Screen backgrounded or closed: stop the clock and persist what was read. */
+    fun onScreenPaused() {
+        sessionTracker.pause()
+        flushSessionTime()
+        savePosition(force = true)
+    }
+
+    fun currentSessionSeconds(): Long = sessionTracker.elapsedSeconds()
+
+    private fun flushSessionTime() {
+        val seconds = sessionTracker.takeUnsavedSeconds()
+        if (seconds <= 0L || bookId <= 0L) return
+        appScope.launch { bookRepository.addReadingSeconds(bookId, seconds) }
+    }
 
     override fun onCleared() {
         super.onCleared()
-        saveSessionTime()
+        // viewModelScope is already cancelled here, so these run on appScope.
+        onScreenPaused()
     }
 }

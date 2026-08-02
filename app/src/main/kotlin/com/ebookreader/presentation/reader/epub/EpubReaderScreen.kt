@@ -6,6 +6,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -25,6 +26,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.ebookreader.presentation.common.formatSessionTime
 import com.ebookreader.presentation.common.formatTotalReadingTime
 import kotlinx.coroutines.delay
@@ -45,24 +49,43 @@ fun EpubReaderScreen(
     viewModel: EpubReaderViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val isDark = settings.theme == AppTheme.DARK
+    // AppTheme.SYSTEM must follow the device, otherwise the app chrome goes dark
+    // while the page stays blinding white.
+    val isDark = when (settings.theme) {
+        AppTheme.DARK -> true
+        AppTheme.SYSTEM -> isSystemInDarkTheme()
+        else -> false
+    }
     val isSepia = settings.theme == AppTheme.SEPIA
     val isHorizontal = settings.readerScrollDirection == ScrollDirection.HORIZONTAL
 
     LaunchedEffect(bookId) { viewModel.loadBook(bookId, settings.fontSize) }
-    LaunchedEffect(settings.fontSize) {
+    LaunchedEffect(settings.fontSize, uiState.isLoading) {
         if (!uiState.isLoading) viewModel.updateFontSize(settings.fontSize)
     }
 
-    // Session reading timer
+    // Session reading timer — the ViewModel owns the clock so it stops while backgrounded.
     var sessionSeconds by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) {
-        while (true) { delay(1000L); sessionSeconds++ }
+        while (true) { delay(1000L); sessionSeconds = viewModel.currentSessionSeconds() }
     }
 
-    // Save session time when leaving screen
-    DisposableEffect(Unit) {
-        onDispose { viewModel.saveSessionTime() }
+    // Count reading time only while the screen is actually in front of the user, and
+    // flush position + elapsed time on every pause (covers swipe-away kills too).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> viewModel.onScreenResumed()
+                Lifecycle.Event.ON_PAUSE -> viewModel.onScreenPaused()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.onScreenPaused()
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -101,6 +124,7 @@ fun EpubReaderScreen(
                     html = uiState.currentChapterHtml,
                     baseUrl = uiState.currentChapterBaseUrl,
                     pendingAnchor = uiState.pendingScrollAnchor,
+                    restoreFraction = uiState.pendingRestoreFraction,
                     isDarkMode = isDark,
                     isSepia = isSepia,
                     onTap = viewModel::toggleControls,
@@ -109,6 +133,7 @@ fun EpubReaderScreen(
                         viewModel.navigateToInternalLink(path, fragment)
                     },
                     onAnchorConsumed = viewModel::clearPendingAnchor,
+                    onRestoreConsumed = viewModel::clearPendingRestore,
                     modifier = Modifier.fillMaxSize()
                 )
 
@@ -212,9 +237,9 @@ fun EpubReaderScreen(
                             IconButton(onClick = viewModel::showTocSheet) {
                                 Icon(Icons.Default.TableRows, "Contents")
                             }
-                            IconButton(onClick = viewModel::markAsFinished) {
+                            IconButton(onClick = { viewModel.markAsFinished() }) {
                                 val finishedTint =
-                                    if (uiState.overallReadingProgress >= 1f)
+                                    if (uiState.isFinished)
                                         MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurface
                                 Icon(
@@ -246,6 +271,9 @@ fun EpubReaderScreen(
                         ) {
                             // Chapter scrubber slider
                             if (uiState.totalChapters > 1) {
+                                // Track the drag locally: loading a chapter on every pixel
+                                // of slider movement re-renders the whole WebView.
+                                var scrubTarget by remember { mutableStateOf<Float?>(null) }
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -261,14 +289,17 @@ fun EpubReaderScreen(
                                         )
                                     }
                                     Text(
-                                        (uiState.currentChapterIndex + 1).toString(),
+                                        ((scrubTarget?.toInt() ?: uiState.currentChapterIndex) + 1)
+                                            .toString(),
                                         style = MaterialTheme.typography.labelMedium,
                                         modifier = Modifier.widthIn(min = 20.dp)
                                     )
                                     Slider(
-                                        value = uiState.currentChapterIndex.toFloat(),
-                                        onValueChange = { v ->
-                                            viewModel.navigateToChapter(v.toInt())
+                                        value = scrubTarget ?: uiState.currentChapterIndex.toFloat(),
+                                        onValueChange = { v -> scrubTarget = v },
+                                        onValueChangeFinished = {
+                                            scrubTarget?.let { viewModel.navigateToChapter(it.toInt()) }
+                                            scrubTarget = null
                                         },
                                         valueRange = 0f..(uiState.totalChapters - 1)
                                             .toFloat().coerceAtLeast(0f),
@@ -433,12 +464,14 @@ private fun EpubWebView(
     html: String,
     baseUrl: String,
     pendingAnchor: String?,
+    restoreFraction: Float?,
     isDarkMode: Boolean,
     isSepia: Boolean,
     onTap: () -> Unit,
     onScrollProgress: (Float) -> Unit,
     onInternalLink: (path: String, fragment: String?) -> Unit,
     onAnchorConsumed: () -> Unit,
+    onRestoreConsumed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val bg = when { isDarkMode -> "#1a1a1a"; isSepia -> "#f8f0e3"; else -> "#ffffff" }
@@ -448,20 +481,60 @@ private fun EpubWebView(
         Regex("<style id=\"epub-reader-base\">", RegexOption.IGNORE_CASE),
         """<style id="epub-reader-base">body{background-color:$bg!important;color:$fg!important;}"""
     )
+    // Bottom padding so the last lines are never hidden by the floating bottom bar.
+    val documentHtml = themedHtml + """
+        <style>body { padding-bottom: 110px !important; }</style>
+    """.trimIndent()
+    val resolvedBaseUrl = baseUrl.ifBlank { "file:///android_asset/" }
 
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
+    // What is currently displayed. Reloading is destructive (it throws away the scroll
+    // position), so it may only happen when the document genuinely changed — not on
+    // every recomposition, which is what scroll callbacks cause.
+    val loadedDocument = remember { mutableStateOf<Pair<String, String>?>(null) }
 
-    LaunchedEffect(pendingAnchor) {
-        if (pendingAnchor != null) {
-            webViewRef.value?.evaluateJavascript(
-                """(function(){
-                    var el = document.getElementById('$pendingAnchor')
-                            || document.querySelector('[name="$pendingAnchor"]');
-                    if(el){ el.scrollIntoView({behavior:'smooth'}); }
-                })();""",
-                null
-            )
-            onAnchorConsumed()
+    val latestOnTap by rememberUpdatedState(onTap)
+    val latestOnScrollProgress by rememberUpdatedState(onScrollProgress)
+    val latestOnInternalLink by rememberUpdatedState(onInternalLink)
+
+    // Applied by the LaunchedEffect below, once the document has finished loading.
+    val pendingAnchorState = rememberUpdatedState(pendingAnchor)
+    val pendingRestoreState = rememberUpdatedState(restoreFraction)
+    val latestOnAnchorConsumed by rememberUpdatedState(onAnchorConsumed)
+    val latestOnRestoreConsumed by rememberUpdatedState(onRestoreConsumed)
+    val documentReady = remember { mutableStateOf(false) }
+
+    fun scrollToAnchorJs(anchor: String) = """
+        (function(){
+            var el = document.getElementById('$anchor')
+                    || document.querySelector('[name="$anchor"]');
+            if(el){ el.scrollIntoView(true); }
+        })();
+    """.trimIndent()
+
+    fun scrollToFractionJs(fraction: Float) = """
+        (function(){
+            var max = Math.max(document.body.scrollHeight - window.innerHeight, 0);
+            window.scrollTo(0, max * $fraction);
+        })();
+    """.trimIndent()
+
+    // Restore/anchor jumps must wait for layout, otherwise they scroll a document that
+    // has no height yet and silently do nothing.
+    LaunchedEffect(documentReady.value, pendingAnchor, restoreFraction) {
+        if (!documentReady.value) return@LaunchedEffect
+        val wv = webViewRef.value ?: return@LaunchedEffect
+        val anchor = pendingAnchorState.value
+        val fraction = pendingRestoreState.value
+        when {
+            anchor != null -> {
+                wv.evaluateJavascript(scrollToAnchorJs(anchor), null)
+                latestOnAnchorConsumed()
+            }
+            fraction != null && fraction > 0f -> {
+                wv.evaluateJavascript(scrollToFractionJs(fraction), null)
+                latestOnRestoreConsumed()
+            }
         }
     }
 
@@ -487,7 +560,7 @@ private fun EpubWebView(
                         val url = request.url
                         return when (url.scheme) {
                             "file" -> {
-                                onInternalLink(url.path ?: return false, url.fragment)
+                                latestOnInternalLink(url.path ?: return false, url.fragment)
                                 true
                             }
                             "http", "https" -> true
@@ -497,7 +570,9 @@ private fun EpubWebView(
 
                     override fun onPageFinished(view: WebView, url: String) {
                         // Inject tap + scroll listeners AFTER page is fully loaded.
-                        // Using named window properties so re-injection removes old listeners.
+                        // Named window properties so re-injection replaces old listeners
+                        // instead of stacking a second one (which made every tap fire
+                        // twice and cancel itself out).
                         view.evaluateJavascript("""
                             (function(){
                                 if(window._tapHandler){
@@ -509,47 +584,45 @@ private fun EpubWebView(
                                 if(window._scrollHandler){
                                     window.removeEventListener('scroll', window._scrollHandler);
                                 }
+                                window._lastReported = -1;
                                 window._scrollHandler = function(){
                                     var max = Math.max(
                                         document.body.scrollHeight - window.innerHeight, 1);
-                                    Android.scrollProgress(
-                                        Math.min(window.scrollY / max, 1.0));
+                                    var f = Math.min(window.scrollY / max, 1.0);
+                                    // Throttle: a raw scroll stream re-renders the whole
+                                    // screen dozens of times a second.
+                                    if(Math.abs(f - window._lastReported) < 0.002) return;
+                                    window._lastReported = f;
+                                    Android.scrollProgress(f);
                                 };
                                 window.addEventListener('scroll', window._scrollHandler);
                             })();
                         """.trimIndent(), null)
+                        documentReady.value = true
                     }
                 }
                 wv.addJavascriptInterface(object : Any() {
                     @android.webkit.JavascriptInterface
-                    fun tap() = onTap()
+                    fun tap() = latestOnTap()
                     @android.webkit.JavascriptInterface
-                    fun scrollProgress(fraction: Float) = onScrollProgress(fraction)
+                    fun scrollProgress(fraction: Float) = latestOnScrollProgress(fraction)
                 }, "Android")
             }
         },
         update = { wv ->
             webViewRef.value = wv
-            // Inject bottom padding so last lines are never hidden by the floating bottom bar
-            val paddedHtml = themedHtml + """
-                <style>body { padding-bottom: 110px !important; }</style>
-            """.trimIndent()
-            wv.loadDataWithBaseURL(
-                baseUrl.ifBlank { "file:///android_asset/" },
-                paddedHtml, "text/html", "UTF-8", null
-            )
-            // Tap + scroll progress bridge
-            wv.evaluateJavascript("""
-                (function(){
-                    document.addEventListener('click', function(){ Android.tap(); });
-                    window.addEventListener('scroll', function(){
-                        var maxScroll = Math.max(
-                            document.body.scrollHeight - window.innerHeight, 1);
-                        var fraction = Math.min(window.scrollY / maxScroll, 1.0);
-                        Android.scrollProgress(fraction);
-                    });
-                })();
-            """.trimIndent(), null)
+            val document = resolvedBaseUrl to documentHtml
+            if (loadedDocument.value != document) {
+                loadedDocument.value = document
+                documentReady.value = false
+                wv.loadDataWithBaseURL(
+                    resolvedBaseUrl, documentHtml, "text/html", "UTF-8", null
+                )
+            }
+        },
+        onRelease = { wv ->
+            wv.stopLoading()
+            wv.destroy()
         },
         modifier = modifier
     )

@@ -80,12 +80,12 @@ fun SettingsScreen(
                 checked = settings.keepScreenOn
             ) { onSettingsChange(settings.copy(keepScreenOn = it)) }
 
-            // Scroll direction — applies to BOTH PDF and EPUB
+            // EPUB only: the PDF renderer is a vertically scrolling page list.
             SettingsItem(
-                title = "Scroll Direction",
+                title = "EPUB Chapter Navigation",
                 subtitle = when (settings.readerScrollDirection) {
-                    ScrollDirection.VERTICAL -> "Vertical — scroll up/down (PDF & EPUB)"
-                    ScrollDirection.HORIZONTAL -> "Horizontal — swipe left/right (PDF & EPUB)"
+                    ScrollDirection.VERTICAL -> "Vertical — scroll only, no swipe zones"
+                    ScrollDirection.HORIZONTAL -> "Horizontal — swipe the edges to change chapter"
                 },
                 icon = when (settings.readerScrollDirection) {
                     ScrollDirection.VERTICAL -> Icons.Default.SwipeDown

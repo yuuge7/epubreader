@@ -1,5 +1,6 @@
 package com.ebookreader.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.ebookreader.domain.model.Book
@@ -18,6 +19,12 @@ data class BookEntity(
     val coverPath: String? = null,
     val totalPages: Int = 0,
     val currentPage: Int = 0,
+    /**
+     * Scroll position *inside* [currentPage] (0f = top, 1f = bottom).
+     * EPUB: scroll offset within the chapter. PDF: unused (page granularity).
+     */
+    @ColumnInfo(defaultValue = "0")
+    val scrollFraction: Float = 0f,
     val isFavorite: Boolean = false,
     val readingStatus: String = ReadingStatus.NOT_STARTED.name,
     val dateAdded: Long = Date().time,
@@ -29,6 +36,7 @@ data class BookEntity(
         id = id, title = title, author = author,
         filePath = filePath, format = BookFormat.valueOf(format),
         coverPath = coverPath, totalPages = totalPages, currentPage = currentPage,
+        scrollFraction = scrollFraction,
         isFavorite = isFavorite, readingStatus = ReadingStatus.valueOf(readingStatus),
         dateAdded = Date(dateAdded), lastRead = lastRead?.let { Date(it) },
         fileSize = fileSize, totalReadingSeconds = totalReadingSeconds
@@ -39,7 +47,8 @@ data class BookEntity(
             id = book.id, title = book.title, author = book.author,
             filePath = book.filePath, format = book.format.name,
             coverPath = book.coverPath, totalPages = book.totalPages,
-            currentPage = book.currentPage, isFavorite = book.isFavorite,
+            currentPage = book.currentPage, scrollFraction = book.scrollFraction,
+            isFavorite = book.isFavorite,
             readingStatus = book.readingStatus.name, dateAdded = book.dateAdded.time,
             lastRead = book.lastRead?.time, fileSize = book.fileSize,
             totalReadingSeconds = book.totalReadingSeconds

@@ -1,0 +1,16 @@
+# Normalise line endings so a commit from Windows cannot break the Linux CI runners.
+* text=auto eol=lf
+
+# Scripts and batch files must keep their native endings to stay runnable.
+*.bat text eol=crlf
+gradlew text eol=lf
+
+# Binary assets — never touched by EOL conversion.
+*.jar binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.apk binary
+*.aab binary
+*.jks binary
+*.keystore binary
