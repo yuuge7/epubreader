@@ -10,6 +10,7 @@ import com.ebookreader.domain.model.ReadingStatus
 import com.ebookreader.domain.repository.BookRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -34,6 +35,11 @@ class PdfReaderViewModel @Inject constructor(
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
+    private companion object {
+        /** How long to wait for the viewer to reach the saved page before giving up. */
+        const val RESTORE_TIMEOUT_MS = 10_000L
+    }
+
     private val _uiState = MutableStateFlow(PdfReaderUiState())
     val uiState: StateFlow<PdfReaderUiState> = _uiState.asStateFlow()
 
@@ -50,6 +56,7 @@ class PdfReaderViewModel @Inject constructor(
      */
     private var positionRestored: Boolean = false
     private var pageToRestore: Int = 0
+    private var userInteracted: Boolean = false
 
     fun loadBook(id: Long) {
         if (bookId == id && _uiState.value.book != null) return
@@ -63,6 +70,15 @@ class PdfReaderViewModel @Inject constructor(
             pageToRestore = book.currentPage
             currentTotalPages = book.totalPages
             positionRestored = book.currentPage <= 0
+            if (!positionRestored) {
+                // Safety net: if the file changed and the saved page no longer exists,
+                // no callback will ever reach it. Without this the book would stop
+                // recording progress entirely.
+                viewModelScope.launch {
+                    delay(RESTORE_TIMEOUT_MS)
+                    positionRestored = true
+                }
+            }
             _uiState.update {
                 it.copy(
                     book = book,
@@ -77,18 +93,24 @@ class PdfReaderViewModel @Inject constructor(
     /** Page the viewer should open on. */
     fun startPage(): Int = pageToRestore
 
-    /** The viewer reported that it reached the restored page; page writes are live again. */
-    fun onRestoreComplete() {
-        positionRestored = true
-    }
-
     fun onPageChanged(page: Int, totalPages: Int) {
         currentTotalPages = totalPages
         if (!positionRestored) {
-            // Ignore everything until the restore lands, but recognise it when it does.
-            if (page == pageToRestore) positionRestored = true
+            // The viewer starts at page 0 and reports its way up to the restored page as
+            // it lays out. Saving any of that would drag the stored position backwards,
+            // a little further on every reopen. Only the target itself ends the wait.
+            if (page >= pageToRestore) {
+                positionRestored = true
+                currentPage = page
+            }
             return
         }
+        // Until the reader actually touches the screen, nothing that happens can be
+        // reading. The list slides backwards on its own while pages render (placeholder
+        // rows are short, so the layout manager scrolls back to fill the viewport), and
+        // saving that would walk the position backwards on every reopen. Opening a book
+        // and closing it untouched must leave the saved page exactly as it was.
+        if (!userInteracted && page != pageToRestore) return
         currentPage = page
         viewModelScope.launch {
             bookRepository.updateReadingProgress(bookId, page, totalPages)
@@ -98,6 +120,22 @@ class PdfReaderViewModel @Inject constructor(
             markAsFinished(jumpToEnd = false)
         }
     }
+
+    /**
+     * The reader touched the screen, so anything that happens next is intentional.
+     * Ends the post-restore pinning immediately so it can never fight a deliberate scroll.
+     */
+    fun onUserInteraction() {
+        userInteracted = true
+        positionRestored = true
+    }
+
+    /**
+     * Whether the restored page should still be re-asserted. The viewer drifts backwards
+     * while page bitmaps load, so the jump is repeated until the layout stops moving —
+     * but never once the reader has taken over.
+     */
+    fun shouldPinRestoredPage(): Boolean = !userInteracted && pageToRestore > 0
 
     /** The renderer could not open the file (deleted, corrupt, unsupported). */
     fun onRenderError(message: String) =

@@ -47,16 +47,16 @@ class EpubParser @Inject constructor(private val context: Context) {
         }
 
         val containerFile = File(extractDir, "META-INF/container.xml")
-        val opfPath = parseContainerXml(containerFile.readText())
+        val opfPath = parseContainerXml(containerFile.readTextWithoutBom())
         val opfFile = File(extractDir, opfPath)
         val opfDir = opfFile.parentFile ?: extractDir
-        val opfContent = opfFile.readText()
+        val opfContent = opfFile.readTextWithoutBom()
 
         val (title, author, spineHrefs, coverHref) = parseOpf(opfContent)
         val ncxHref = findNcxHref(opfContent)
         val chapters = if (ncxHref != null) {
             val ncxFile = File(opfDir, ncxHref)
-            if (ncxFile.exists()) parseNcx(ncxFile.readText(), spineHrefs)
+            if (ncxFile.exists()) parseNcx(ncxFile.readTextWithoutBom(), spineHrefs)
             else buildChaptersFromSpine(spineHrefs)
         } else buildChaptersFromSpine(spineHrefs)
 
@@ -67,7 +67,7 @@ class EpubParser @Inject constructor(private val context: Context) {
             val chapterFile = File(opfDir, chapter.href.substringBefore("#"))
             if (chapterFile.exists()) {
                 val chapterDir = chapterFile.parentFile ?: opfDir
-                val rawHtml = chapterFile.readText()
+                val rawHtml = chapterFile.readTextWithoutBom()
                 chapterContents[chapter.id] = injectReaderStyles(rawHtml, chapterDir.absolutePath)
                 chapterBaseUrls[chapter.id] = "file://${chapterDir.absolutePath}/"
             }
@@ -114,8 +114,13 @@ class EpubParser @Inject constructor(private val context: Context) {
                         "metadata" -> inMeta = true
                         "manifest" -> inManifest = true
                         "spine" -> inSpine = true
-                        "dc:title" -> if (inMeta) parser.nextText().trim().takeIf { it.isNotBlank() }?.let { title = it }
-                        "dc:creator" -> if (inMeta) parser.nextText().trim().takeIf { it.isNotBlank() }?.let { author = it }
+                        // Namespace-aware parsing reports the *local* name, so this sees
+                        // "title"/"creator". The prefixed forms are kept for the rare
+                        // OPF that declares no namespace.
+                        "title", "dc:title" ->
+                            if (inMeta) parser.nextText().trim().takeIf { it.isNotBlank() }?.let { title = it }
+                        "creator", "dc:creator" ->
+                            if (inMeta) parser.nextText().trim().takeIf { it.isNotBlank() }?.let { author = it }
                         "meta" -> if (inMeta && parser.getAttributeValue(null, "name") == "cover")
                             coverMetaId = parser.getAttributeValue(null, "content")
                         "item" -> if (inManifest) {
@@ -207,6 +212,13 @@ class EpubParser @Inject constructor(private val context: Context) {
             html.replace(Regex("<head>", RegexOption.IGNORE_CASE), "<head>\n$style")
         else "<html><head>$style</head><body>$html</body></html>"
     }
+
+    /**
+     * XmlPullParser chokes on a byte-order mark ("Unexpected token @1:2") and the whole
+     * book then fails to open. Plenty of EPUBs in the wild ship a BOM in container.xml,
+     * the OPF or the NCX, so strip it before parsing.
+     */
+    private fun File.readTextWithoutBom(): String = readText().removePrefix("\uFEFF")
 
     /**
      * Cache directory for an EPUB. Keyed by the full path, not just the file name —

@@ -512,10 +512,33 @@ private fun EpubWebView(
         })();
     """.trimIndent()
 
+    // onPageFinished fires before images and web fonts have finished loading, so the
+    // document is still short and a single scrollTo lands earlier than intended. Worse,
+    // that early position used to be reported straight back and saved, so every reopen
+    // drifted further back. Suppress reporting while restoring and keep re-applying the
+    // fraction until the height stops changing.
     fun scrollToFractionJs(fraction: Float) = """
         (function(){
-            var max = Math.max(document.body.scrollHeight - window.innerHeight, 0);
-            window.scrollTo(0, max * $fraction);
+            var target = $fraction;
+            window._restoring = true;
+            var lastHeight = -1, stableTicks = 0, totalTicks = 0;
+
+            function finish(){ window._restoring = false; }
+
+            function apply(){
+                if (!window._restoring) return;
+                var height = document.body.scrollHeight;
+                var max = Math.max(height - window.innerHeight, 0);
+                window.scrollTo(0, max * target);
+                if (height === lastHeight) { stableTicks++; } else { lastHeight = height; stableTicks = 0; }
+                totalTicks++;
+                if (stableTicks < 3 && totalTicks < 40) { setTimeout(apply, 100); } else { finish(); }
+            }
+
+            // Any deliberate touch wins over the restore.
+            document.addEventListener('touchstart', finish, { passive: true, once: true });
+            window.addEventListener('load', apply);
+            apply();
         })();
     """.trimIndent()
 
@@ -585,7 +608,12 @@ private fun EpubWebView(
                                     window.removeEventListener('scroll', window._scrollHandler);
                                 }
                                 window._lastReported = -1;
+                                window._restoring = false;
                                 window._scrollHandler = function(){
+                                    // While restoring, the document is still growing as
+                                    // images load. Reporting those positions would
+                                    // overwrite the saved one with a too-early value.
+                                    if(window._restoring) return;
                                     var max = Math.max(
                                         document.body.scrollHeight - window.innerHeight, 1);
                                     var f = Math.min(window.scrollY / max, 1.0);

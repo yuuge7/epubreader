@@ -78,6 +78,21 @@ fun PdfReaderScreen(
         }
     }
 
+    // Re-assert the restored page while the document renders. Page rows start out as
+    // short placeholders, so the layout manager scrolls back to fill the screen and the
+    // book opens a few pages early; repeating the jump as real heights arrive makes it
+    // stick. Stops the moment the reader touches anything.
+    LaunchedEffect(uiState.book?.id) {
+        if (uiState.book == null) return@LaunchedEffect
+        val target = viewModel.startPage()
+        if (target <= 0) return@LaunchedEffect
+        repeat(12) {
+            delay(400L)
+            if (!viewModel.shouldPinRestoredPage()) return@LaunchedEffect
+            pdfViewRef.value?.jumpToPage(target)
+        }
+    }
+
     // Only count time while the screen is in front of the user; flush position and
     // elapsed time on every pause so a swipe-away kill cannot lose them.
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -138,7 +153,7 @@ fun PdfReaderScreen(
                         totalPages  = total
                         viewModel.onPageChanged(page, total)
                     },
-                    onRestored = viewModel::onRestoreComplete,
+                    onUserTouch = viewModel::onUserInteraction,
                     onError = viewModel::onRenderError,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -354,13 +369,13 @@ private fun PdfViewerWidget(
     pdfViewRef: MutableState<PdfRendererView?>,
     onTap: () -> Unit,
     onPageChanged: (page: Int, total: Int) -> Unit,
-    onRestored: () -> Unit,
+    onUserTouch: () -> Unit,
     onError: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val latestOnTap by rememberUpdatedState(onTap)
     val latestOnPageChanged by rememberUpdatedState(onPageChanged)
-    val latestOnRestored by rememberUpdatedState(onRestored)
+    val latestOnUserTouch by rememberUpdatedState(onUserTouch)
     val latestOnError by rememberUpdatedState(onError)
 
     AndroidView(
@@ -390,12 +405,10 @@ private fun PdfViewerWidget(
                     // StatusCallBack.onPdfLoadSuccess, which the library only fires on
                     // the *download* path — with initWithFile it never ran, so every
                     // PDF reopened at page 1. jumpToPage queues itself internally
-                    // until the renderer is ready.
+                    // until the renderer is ready; the ViewModel decides when the jump
+                    // has landed by watching the reported pages.
                     if (startPage > 0) {
                         view.jumpToPage(startPage)
-                        view.recyclerView.post { latestOnRestored() }
-                    } else {
-                        latestOnRestored()
                     }
 
                     // The pinch-zoom RecyclerView consumes touches, so a click listener
@@ -416,6 +429,7 @@ private fun PdfViewerWidget(
                                 rv: RecyclerView,
                                 e: MotionEvent
                             ): Boolean {
+                                if (e.action == MotionEvent.ACTION_DOWN) latestOnUserTouch()
                                 tapDetector.onTouchEvent(e)
                                 return false
                             }

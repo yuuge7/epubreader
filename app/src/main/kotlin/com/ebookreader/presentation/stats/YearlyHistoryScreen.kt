@@ -61,19 +61,22 @@ fun YearlyHistoryScreen(
                         ) {
                             Row(
                                 modifier = Modifier.padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                // Fixed gap so the duration never crowds the year.
+                                horizontalArrangement = Arrangement.spacedBy(24.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     year.year.toString(),
                                     style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f)
                                 )
                                 Text(
                                     formatTotalReadingTime(year.totalSeconds),
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1
                                 )
                             }
                         }
