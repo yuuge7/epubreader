@@ -68,7 +68,7 @@ class EpubParser @Inject constructor(private val context: Context) {
             if (chapterFile.exists()) {
                 val chapterDir = chapterFile.parentFile ?: opfDir
                 val rawHtml = chapterFile.readTextWithoutBom()
-                chapterContents[chapter.id] = injectReaderStyles(rawHtml, chapterDir.absolutePath)
+                chapterContents[chapter.id] = injectReaderStyles(rawHtml)
                 chapterBaseUrls[chapter.id] = "file://${chapterDir.absolutePath}/"
             }
         }
@@ -198,7 +198,7 @@ class EpubParser @Inject constructor(private val context: Context) {
             EpubChapter(id = id, title = "Chapter ${i + 1}", href = href.substringBefore("#"), index = i)
         }
 
-    private fun injectReaderStyles(html: String, chapterDirPath: String): String {
+    private fun injectReaderStyles(html: String): String {
         val style = """
             <style id="epub-reader-base">
                 body { font-family: Georgia, serif; line-height: 1.7; padding: 16px; margin: 0; word-wrap: break-word; }

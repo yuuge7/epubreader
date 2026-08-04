@@ -149,8 +149,8 @@ keytool -genkeypair -v -keystore epubreader-release.jks -storetype PKCS12 \
 To cut a release, bump both values in `app/build.gradle.kts` and push to `main`:
 
 ```kotlin
-versionCode = 3        // must increase for every published build
-versionName = "1.2"    // becomes tag v1.2 and title "EBook Reader v1.2"
+versionCode = 4        // must increase for every published build
+versionName = "1.3"    // becomes tag v1.3 and title "EBook Reader v1.3"
 ```
 
 Pushes that do not change `versionName` build and then skip publishing, so routine commits never fail. The About screen reads `versionName` from `BuildConfig`, so it never needs a manual edit.
