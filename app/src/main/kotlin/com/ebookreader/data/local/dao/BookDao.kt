@@ -100,6 +100,36 @@ interface BookDao {
     @Query("UPDATE books SET totalReadingSeconds = totalReadingSeconds + :seconds WHERE id = :bookId")
     suspend fun addReadingSeconds(bookId: Long, seconds: Long)
 
+    /** Overwrites the running total. Used by a REPLACE stats import, which rebuilds it from sessions. */
+    @Query("UPDATE books SET totalReadingSeconds = :seconds WHERE id = :bookId")
+    suspend fun setReadingSeconds(bookId: Long, seconds: Long)
+
+    /** One-shot read for stats export/import matching; the Flow variants never complete. */
+    @Query("SELECT * FROM books")
+    suspend fun getAllBooksOnce(): List<BookEntity>
+
+    /**
+     * Restores a reading position from a stats backup. Deliberately touches only the
+     * progress columns — filePath, coverPath and fileSize describe *this* device's copy
+     * of the file and must survive the import.
+     */
+    @Query(
+        """
+        UPDATE books
+        SET currentPage = :page, scrollFraction = :scrollFraction,
+            readingStatus = :status, lastRead = :lastRead, isFavorite = :isFavorite
+        WHERE id = :bookId
+        """
+    )
+    suspend fun restoreProgress(
+        bookId: Long,
+        page: Int,
+        scrollFraction: Float,
+        status: String,
+        lastRead: Long?,
+        isFavorite: Boolean
+    )
+
     @Query("SELECT COUNT(*) FROM books")
     fun getBookCount(): Flow<Int>
 

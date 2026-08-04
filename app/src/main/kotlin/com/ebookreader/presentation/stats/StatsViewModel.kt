@@ -1,14 +1,23 @@
 package com.ebookreader.presentation.stats
 
+import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ebookreader.data.backup.StatsBackupCodec
+import com.ebookreader.data.backup.StatsBackupManager
 import com.ebookreader.domain.model.BookReadingStat
 import com.ebookreader.domain.model.MonthSummary
 import com.ebookreader.domain.model.YearSummary
 import com.ebookreader.domain.model.ReadingSession
+import com.ebookreader.domain.model.StatsImportMode
 import com.ebookreader.domain.repository.BookRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -27,7 +36,9 @@ data class StatsUiState(
 
 @HiltViewModel
 class StatsViewModel @Inject constructor(
-    private val bookRepository: BookRepository
+    private val bookRepository: BookRepository,
+    private val statsBackupManager: StatsBackupManager,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     val uiState: StateFlow<StatsUiState> = bookRepository.getAllReadingSessions()
@@ -125,4 +136,76 @@ class StatsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = StatsUiState()
         )
+
+    // ── Backup ────────────────────────────────────────────────────────────────
+
+    private val _backupState = MutableStateFlow(StatsBackupState())
+    val backupState: StateFlow<StatsBackupState> = _backupState.asStateFlow()
+
+    /** Filename offered by the "create document" picker. */
+    fun suggestedFileName(): String {
+        val stamp = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        return "reading-stats-$stamp.json"
+    }
+
+    fun exportStats(target: Uri) {
+        if (_backupState.value.isBusy) return
+        _backupState.update { it.copy(isBusy = true) }
+        viewModelScope.launch {
+            val message = try {
+                val backup = statsBackupManager.export()
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(target, "wt")
+                        ?.use { it.write(StatsBackupCodec.encode(backup).toByteArray()) }
+                        ?: error("Could not open the selected file for writing.")
+                }
+                "Exported ${backup.sessions.size} sessions and ${backup.books.size} books."
+            } catch (e: Exception) {
+                "Export failed: ${e.message ?: "unknown error"}"
+            }
+            _backupState.update { it.copy(isBusy = false, message = message) }
+        }
+    }
+
+    fun importStats(source: Uri, mode: StatsImportMode, restoreProgress: Boolean) {
+        if (_backupState.value.isBusy) return
+        _backupState.update { it.copy(isBusy = true) }
+        viewModelScope.launch {
+            val message = try {
+                val json = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(source)
+                        ?.use { it.readBytes().toString(Charsets.UTF_8) }
+                        ?: error("Could not open the selected file.")
+                }
+                val result = statsBackupManager.import(
+                    backup = StatsBackupCodec.decode(json),
+                    mode = mode,
+                    restoreProgress = restoreProgress
+                )
+                buildString {
+                    append("Imported ${result.sessionsImported} sessions")
+                    if (result.sessionsSkipped > 0) {
+                        append(" (${result.sessionsSkipped} already present)")
+                    }
+                    append(". ${result.booksMatched} books matched")
+                    if (result.booksUnmatched > 0) {
+                        append(", ${result.booksUnmatched} not in this library")
+                    }
+                    append(".")
+                }
+            } catch (e: StatsBackupCodec.InvalidBackupException) {
+                e.message ?: "That file is not a stats backup."
+            } catch (e: Exception) {
+                "Import failed: ${e.message ?: "unknown error"}"
+            }
+            _backupState.update { it.copy(isBusy = false, message = message) }
+        }
+    }
+
+    fun consumeBackupMessage() = _backupState.update { it.copy(message = null) }
 }
+
+data class StatsBackupState(
+    val isBusy: Boolean = false,
+    val message: String? = null
+)

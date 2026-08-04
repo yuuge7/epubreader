@@ -11,8 +11,18 @@ interface ReadingSessionDao {
     @Insert
     suspend fun insertSession(session: ReadingSessionEntity)
 
+    @Insert
+    suspend fun insertSessions(sessions: List<ReadingSessionEntity>)
+
     @Query("SELECT * FROM reading_sessions ORDER BY timestamp DESC")
     fun getAllSessions(): Flow<List<ReadingSessionEntity>>
+
+    /** One-shot read for export; the Flow variant never completes. */
+    @Query("SELECT * FROM reading_sessions ORDER BY timestamp DESC")
+    suspend fun getAllSessionsOnce(): List<ReadingSessionEntity>
+
+    @Query("DELETE FROM reading_sessions")
+    suspend fun deleteAllSessions()
 
     @Query("SELECT * FROM reading_sessions WHERE bookId = :bookId ORDER BY timestamp DESC")
     fun getSessionsForBook(bookId: Long): Flow<List<ReadingSessionEntity>>

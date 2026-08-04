@@ -29,6 +29,10 @@ An offline-first Android reader for EPUB and PDF books, with a library manager, 
 - Per-session and per-book reading time, counted only while the app is in the foreground
 - Monthly and yearly summaries with drill-down history
 - Most-read leaderboards; history is retained even after a book is removed
+- Export and import the whole history as a JSON file (Stats screen ⋮ menu), so it survives
+  a reinstall or moves to a new device. Books are matched by title + author, since row ids
+  mean nothing outside the device that made them; import either merges (skipping sessions
+  the device already has) or replaces the local history outright.
 
 ## Requirements
 
