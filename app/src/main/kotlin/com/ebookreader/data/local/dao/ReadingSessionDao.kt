@@ -23,13 +23,4 @@ interface ReadingSessionDao {
 
     @Query("DELETE FROM reading_sessions")
     suspend fun deleteAllSessions()
-
-    @Query("SELECT * FROM reading_sessions WHERE bookId = :bookId ORDER BY timestamp DESC")
-    fun getSessionsForBook(bookId: Long): Flow<List<ReadingSessionEntity>>
-
-    @Query("SELECT SUM(durationSeconds) FROM reading_sessions WHERE timestamp >= :startTime")
-    fun getTotalReadingTimeSince(startTime: Long): Flow<Long?>
-
-    @Query("SELECT SUM(durationSeconds) FROM reading_sessions WHERE timestamp >= :startTime AND timestamp <= :endTime")
-    fun getReadingTimeInRange(startTime: Long, endTime: Long): Flow<Long?>
 }

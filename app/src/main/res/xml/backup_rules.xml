@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cloud backup rules for API 30 and below.
+
+  Only the library index and the user's settings are backed up. The imported book
+  files themselves live in files/books and are deliberately excluded: they are large,
+  they are already on the user's device or in their own storage, and uploading a
+  person's whole library to Google's backup servers is not something an offline-first
+  reader should do silently. Covers are excluded for the same reason and because they
+  are regenerated on import.
+
+  Listing any <include> makes the backup opt-in, so anything not named here is skipped.
+-->
+<full-backup-content>
+    <!-- Library, bookmarks and reading history. -->
+    <include domain="database" path="." />
+    <!-- DataStore-backed app settings. -->
+    <include domain="file" path="datastore/" />
+</full-backup-content>

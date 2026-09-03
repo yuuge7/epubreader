@@ -130,9 +130,6 @@ interface BookDao {
         isFavorite: Boolean
     )
 
-    @Query("SELECT COUNT(*) FROM books")
-    fun getBookCount(): Flow<Int>
-
     @Query("SELECT * FROM books WHERE filePath = :filePath LIMIT 1")
     suspend fun getBookByFilePath(filePath: String): BookEntity?
 }

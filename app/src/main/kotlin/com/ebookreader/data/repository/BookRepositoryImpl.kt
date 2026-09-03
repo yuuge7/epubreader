@@ -1,5 +1,7 @@
 package com.ebookreader.data.repository
 
+import android.content.Context
+import com.ebookreader.data.epub.EpubParser
 import com.ebookreader.data.local.dao.BookDao
 import com.ebookreader.data.local.dao.BookmarkDao
 import com.ebookreader.data.local.dao.ReadingSessionDao
@@ -8,8 +10,12 @@ import com.ebookreader.data.local.entity.BookmarkEntity
 import com.ebookreader.data.local.entity.ReadingSessionEntity
 import com.ebookreader.domain.model.*
 import com.ebookreader.domain.repository.BookRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Date
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,7 +24,9 @@ import javax.inject.Singleton
 class BookRepositoryImpl @Inject constructor(
     private val bookDao: BookDao,
     private val bookmarkDao: BookmarkDao,
-    private val readingSessionDao: ReadingSessionDao
+    private val readingSessionDao: ReadingSessionDao,
+    private val epubParser: EpubParser,
+    @ApplicationContext private val context: Context
 ) : BookRepository {
 
     override fun getAllBooks(sortOption: SortOption): Flow<List<Book>> {
@@ -66,8 +74,34 @@ class BookRepositoryImpl @Inject constructor(
     override suspend fun updateBook(book: Book) =
         bookDao.updateBook(BookEntity.fromDomain(book))
 
-    override suspend fun deleteBook(book: Book) =
+    /**
+     * Removes the book and everything the app created for it.
+     *
+     * Bookmarks go with it through the foreign key; reading sessions deliberately do not,
+     * so the history a book produced survives its removal. The files are not covered by
+     * either rule and used to be left behind forever: the copy made at import, the
+     * extracted cover, and the EPUB extraction cache.
+     */
+    override suspend fun deleteBook(book: Book) {
         bookDao.deleteBook(BookEntity.fromDomain(book))
+        withContext(Dispatchers.IO) {
+            // Only ever delete inside the app's own storage. If a future version starts
+            // referencing books where the user keeps them, this must not reach out and
+            // delete the original.
+            deleteIfOwned(book.filePath)
+            book.coverPath?.let(::deleteIfOwned)
+            runCatching { epubParser.clearCache(book.filePath) }
+        }
+    }
+
+    /** Deletes [path] only when it lives under the app's private files directory. */
+    private fun deleteIfOwned(path: String) {
+        runCatching {
+            val target = File(path).canonicalFile
+            val owned = context.filesDir.canonicalFile.toPath()
+            if (target.toPath().startsWith(owned)) target.delete()
+        }
+    }
 
     override suspend fun updateReadingProgress(
         bookId: Long,
@@ -141,7 +175,4 @@ class BookRepositoryImpl @Inject constructor(
                 )
             }
         }
-
-    override fun getReadingTimeInRange(startTime: Long, endTime: Long): Flow<Long> =
-        readingSessionDao.getReadingTimeInRange(startTime, endTime).map { it ?: 0L }
 }

@@ -18,12 +18,6 @@ interface BookmarkDao {
     @Delete
     suspend fun deleteBookmark(bookmark: BookmarkEntity)
 
-    @Query("DELETE FROM bookmarks WHERE id = :id")
-    suspend fun deleteBookmarkById(id: Long)
-
     @Query("SELECT COUNT(*) FROM bookmarks WHERE bookId = :bookId AND page = :page")
     suspend fun isPageBookmarked(bookId: Long, page: Int): Int
-
-    @Query("DELETE FROM bookmarks WHERE bookId = :bookId")
-    suspend fun deleteAllBookmarksForBook(bookId: Long)
 }

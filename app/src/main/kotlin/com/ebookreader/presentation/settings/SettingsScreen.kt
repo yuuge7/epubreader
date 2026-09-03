@@ -50,11 +50,21 @@ fun SettingsScreen(
                 ) { onSettingsChange(settings.copy(theme = it)) }
             }
 
-            SettingsItem("Font Size", "${settings.fontSize.toInt()}sp", Icons.Default.FormatSize) {
+            // Track the drag locally. Writing on every onValueChange put a DataStore write
+            // and a full settings re-emission on each frame of the gesture, which in turn
+            // re-rendered the open EPUB chapter; only the value the user settles on is saved.
+            var fontSizeDraft by remember { mutableStateOf<Float?>(null) }
+            val shownFontSize = fontSizeDraft ?: settings.fontSize
+
+            SettingsItem("Font Size", "${shownFontSize.toInt()}sp", Icons.Default.FormatSize) {
                 Column {
                     Slider(
-                        value = settings.fontSize,
-                        onValueChange = { onSettingsChange(settings.copy(fontSize = it)) },
+                        value = shownFontSize,
+                        onValueChange = { fontSizeDraft = it },
+                        onValueChangeFinished = {
+                            fontSizeDraft?.let { onSettingsChange(settings.copy(fontSize = it)) }
+                            fontSizeDraft = null
+                        },
                         valueRange = 10f..32f,
                         steps = 21,
                         modifier = Modifier.fillMaxWidth()

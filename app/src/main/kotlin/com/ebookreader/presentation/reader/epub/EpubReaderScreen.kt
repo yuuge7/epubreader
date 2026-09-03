@@ -25,8 +25,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.ebookreader.presentation.common.formatSessionTime
@@ -568,8 +568,11 @@ private fun EpubWebView(
                 wv.settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
+                    // Needed to load the book's own images, fonts and stylesheets out of
+                    // the extraction directory.
                     allowFileAccess = true
                     allowContentAccess = true
+                    applyUntrustedContentPolicy()
                     setSupportZoom(true)
                     builtInZoomControls = true
                     displayZoomControls = false
@@ -654,6 +657,27 @@ private fun EpubWebView(
         },
         modifier = modifier
     )
+}
+
+/**
+ * Locks down the settings that matter when the document is a book rather than a page the
+ * app authored. An EPUB is untrusted HTML running with JavaScript enabled and a
+ * JavascriptInterface attached, so:
+ *
+ *  - it must not be able to fetch other `file://` URLs, which would let a malicious book
+ *    read the rest of the library and hand it to a script;
+ *  - it must not reach the network at all. The app is offline by design, and a remote
+ *    image or beacon in a chapter would otherwise report back what is being read, and when.
+ *
+ * The two file-URL flags already default to false at this minSdk; they are set explicitly
+ * so the intent survives someone loosening the settings above.
+ */
+@Suppress("DEPRECATION")
+private fun android.webkit.WebSettings.applyUntrustedContentPolicy() {
+    allowFileAccessFromFileURLs = false
+    allowUniversalAccessFromFileURLs = false
+    blockNetworkLoads = true
+    blockNetworkImage = true
 }
 
 // ── TOC ───────────────────────────────────────────────────────────────────────

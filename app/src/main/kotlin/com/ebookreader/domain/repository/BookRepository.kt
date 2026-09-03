@@ -39,5 +39,4 @@ interface BookRepository {
     suspend fun addReadingSeconds(bookId: Long, seconds: Long)
 
     fun getAllReadingSessions(): Flow<List<ReadingSession>>
-    fun getReadingTimeInRange(startTime: Long, endTime: Long): Flow<Long>
 }
