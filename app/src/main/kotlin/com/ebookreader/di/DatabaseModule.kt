@@ -67,7 +67,7 @@ object DatabaseModule {
             // Only the pre-release schemas (1, 2) may be thrown away. Everything from v3 on
             // must migrate: a destructive fallback here deletes the user's whole library,
             // reading progress, bookmarks and stats on an app update.
-            .fallbackToDestructiveMigrationFrom(1, 2)
+            .fallbackToDestructiveMigrationFrom(dropAllTables = true, 1, 2)
             .build()
 
     @Provides

@@ -1,8 +1,9 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.ksp)
 }
@@ -21,16 +22,18 @@ val hasReleaseSigning = keystoreProperties.getProperty("storeFile") != null &&
 
 android {
     namespace = "com.ebookreader"
-    compileSdk = 34
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.ebookreader"
         minSdk = 26
-        targetSdk = 34
+        // Play requires the current target level for updates; staying behind it blocks
+        // publishing entirely, so this must not drift again.
+        targetSdk = 36
         // versionCode must increase for every published build; versionName drives the
         // release tag and title (see .github/workflows/release.yml).
-        versionCode = 4
-        versionName = "1.5"
+        versionCode = 5
+        versionName = "1.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -47,6 +50,10 @@ android {
 
     buildTypes {
         release {
+            // TODO(A9): turn on R8 + resource shrinking. It needs keep rules verified
+            // against Room, Hilt and the PDF viewer's reflection on a real device first,
+            // so it stays off until that pass rather than shipping a build that only
+            // breaks at runtime.
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -63,24 +70,23 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         compose = true
         // Exposes VERSION_NAME so the About screen cannot drift from the real version.
         buildConfig = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.11"
-    }
-
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+}
+
+// AGP 9 supplies Kotlin itself, so this replaces the old android.kotlinOptions block.
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 
@@ -135,10 +141,6 @@ dependencies {
 
     // PDF Viewer — Maven Central, no JitPack required
     implementation("io.github.afreakyelf:Pdf-Viewer:2.1.1")
-
-    // Accompanist
-    implementation(libs.accompanist.permissions)
-    implementation(libs.accompanist.systemuicontroller)
 
     // RecyclerView (for PDF scrolling helper)
     implementation(libs.androidx.recyclerview)
