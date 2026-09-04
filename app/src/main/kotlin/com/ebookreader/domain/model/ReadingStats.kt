@@ -10,12 +10,6 @@ data class ReadingSession(
     val timestamp: Date = Date()
 )
 
-data class ReadingStats(
-    val totalSeconds: Long,
-    val dailyStats: Map<Date, Long>, // Start of day to seconds
-    val bookStats: Map<Long, Long>   // BookId to seconds
-)
-
 data class BookReadingStat(
     val bookId: Long,
     val bookTitle: String,

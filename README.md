@@ -4,7 +4,7 @@ An offline-first Android reader for EPUB and PDF books, with a library manager, 
 
 <p align="left">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Android%208.0%2B-3DDC84?logo=android&logoColor=white">
-  <img alt="Language" src="https://img.shields.io/badge/kotlin-1.9.23-7F52FF?logo=kotlin&logoColor=white">
+  <img alt="Language" src="https://img.shields.io/badge/kotlin-2.2.10-7F52FF?logo=kotlin&logoColor=white">
   <img alt="UI" src="https://img.shields.io/badge/UI-Jetpack%20Compose-4285F4">
   <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 </p>
@@ -39,9 +39,9 @@ An offline-first Android reader for EPUB and PDF books, with a library manager, 
 | | |
 |---|---|
 | Android | 8.0 (API 26) or newer |
-| JDK | 17 (Android Gradle Plugin 8.3 does not support JDK 22+) |
-| Android SDK | Platform 34, Build-Tools 34 |
-| Android Studio | Hedgehog (2023.1.1) or newer — optional, Gradle CLI is enough |
+| JDK | 17 to 26 (Gradle 9.6 runs on any of them; Kotlin ships with AGP, not as a separate plugin) |
+| Android SDK | Platform 37, Build-Tools 36 |
+| Android Studio | Any release that supports AGP 9.4 — optional, Gradle CLI is enough |
 
 ## Getting started
 
@@ -59,15 +59,17 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 In Android Studio, open the project root and run the `app` configuration. Gradle downloads the required SDK packages on first sync.
 
-If `./gradlew` fails with a message naming your Java version, you are not on JDK 17:
+If `./gradlew` fails with a message that is just a version number, the JDK running
+Gradle is outside the supported range:
 
 ```bash
 java -version                                    # check
-export JAVA_HOME=/path/to/jdk-17                 # macOS/Linux
-$env:JAVA_HOME = "C:\path\to\jdk-17"             # Windows PowerShell
+export JAVA_HOME=/path/to/jdk                    # macOS/Linux
+$env:JAVA_HOME = "C:\path\to\jdk"                 # Windows PowerShell
 ```
 
-Android Studio's bundled JDK is often newer than 17; set **Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK** to a JDK 17 instead.
+The build also needs `ANDROID_HOME`, or `sdk.dir` in `local.properties`, pointing at
+an Android SDK that has platform 37 installed.
 
 ## Project layout
 
