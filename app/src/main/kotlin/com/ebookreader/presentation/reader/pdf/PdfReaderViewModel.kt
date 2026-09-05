@@ -10,7 +10,9 @@ import com.ebookreader.domain.model.ReadingStatus
 import com.ebookreader.domain.repository.BookRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -38,6 +40,8 @@ class PdfReaderViewModel @Inject constructor(
     private companion object {
         /** How long to wait for the viewer to reach the saved page before giving up. */
         const val RESTORE_TIMEOUT_MS = 10_000L
+        /** How often reading time is persisted while the screen stays open. */
+        const val PERIODIC_FLUSH_MS = 60_000L
     }
 
     private val _uiState = MutableStateFlow(PdfReaderUiState())
@@ -45,6 +49,7 @@ class PdfReaderViewModel @Inject constructor(
 
     private val sessionTracker = ReadingSessionTracker()
 
+    private var flushJob: Job? = null
     private var bookId: Long = -1L
     private var currentPage: Int = 0
     private var currentTotalPages: Int = 0
@@ -198,12 +203,36 @@ class PdfReaderViewModel @Inject constructor(
 
     // ── Session time ─────────────────────────────────────────────────────────
 
-    fun onScreenResumed() = sessionTracker.resume()
+    fun onScreenResumed() {
+        sessionTracker.resume()
+        startPeriodicFlush()
+    }
 
     fun onScreenPaused() {
+        stopPeriodicFlush()
         sessionTracker.pause()
         flushSessionTime()
         flushPosition()
+    }
+
+    /**
+     * Reading time is written out every minute as well as on every pause. Losing at most
+     * a minute to a crash or a battery pull is the point; the sitting is extended rather
+     * than split, so flushing this often costs nothing in the history.
+     */
+    private fun startPeriodicFlush() {
+        if (flushJob?.isActive == true) return
+        flushJob = viewModelScope.launch {
+            while (isActive) {
+                delay(PERIODIC_FLUSH_MS)
+                flushSessionTime()
+            }
+        }
+    }
+
+    private fun stopPeriodicFlush() {
+        flushJob?.cancel()
+        flushJob = null
     }
 
     fun currentSessionSeconds(): Long = sessionTracker.elapsedSeconds()

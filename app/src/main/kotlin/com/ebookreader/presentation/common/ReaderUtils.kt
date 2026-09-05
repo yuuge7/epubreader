@@ -7,7 +7,9 @@ fun formatSessionTime(seconds: Long): String {
     val s = seconds % 60
     return when {
         h > 0 -> "${h}h ${m}m"
-        m > 0 -> "${m}m ${s}s"
+        // "25m 0s" is noise in the history; seconds only earn their place when there are some.
+        m > 0 && s > 0 -> "${m}m ${s}s"
+        m > 0 -> "${m}m"
         else -> "${s}s"
     }
 }

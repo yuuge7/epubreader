@@ -50,6 +50,7 @@ class StatsBackupManager @Inject constructor(
                     bookTitle = session.bookTitle.ifBlank { book?.title ?: UNKNOWN_TITLE },
                     bookAuthor = book?.author.orEmpty(),
                     durationSeconds = session.durationSeconds,
+                    startedAt = session.startedAt,
                     timestamp = session.timestamp
                 )
             }
@@ -77,6 +78,7 @@ class StatsBackupManager @Inject constructor(
                 bookId = localIdByKey[key] ?: syntheticBookId(key),
                 bookTitle = session.bookTitle.ifBlank { UNKNOWN_TITLE },
                 durationSeconds = session.durationSeconds,
+                startedAt = session.startedAt,
                 timestamp = session.timestamp
             )
         }
@@ -85,13 +87,11 @@ class StatsBackupManager @Inject constructor(
             StatsImportMode.REPLACE -> {
                 sessionDao.deleteAllSessions()
                 // Two exports of the same history can still overlap inside one file.
-                resolved.distinctBy { it.dedupeKey() }
+                resolved.withoutOverlaps(emptyList())
             }
 
             StatsImportMode.MERGE -> {
-                val seen = sessionDao.getAllSessionsOnce()
-                    .mapTo(mutableSetOf()) { it.dedupeKey() }
-                resolved.filter { seen.add(it.dedupeKey()) }
+                resolved.withoutOverlaps(sessionDao.getAllSessionsOnce())
             }
         }
         val skipped = resolved.size - toInsert.size
@@ -169,7 +169,35 @@ class StatsBackupManager @Inject constructor(
     )
 
     /** A session is the same session if it is the same book, instant and length. */
-    private fun ReadingSessionEntity.dedupeKey() = Triple(bookId, timestamp, durationSeconds)
+    /**
+     * Drops incoming sittings that the device already has.
+     *
+     * Matching on exact (book, end, duration) used to be enough, but a sitting's end and
+     * duration both move as it is extended, and the v4 -> v5 migration rewrote old rows
+     * for the same reason. So overlap decides instead: nobody reads the same book in two
+     * places at once, which makes two overlapping sittings for one book the same sitting.
+     * Incoming rows are checked against each other as well, since one file can contain
+     * two exports of the same history.
+     */
+    private fun List<ReadingSessionEntity>.withoutOverlaps(
+        existing: List<ReadingSessionEntity>
+    ): List<ReadingSessionEntity> {
+        val spansByBook = existing.groupByTo(mutableMapOf(), { it.bookId }) {
+            it.startedAt to it.timestamp
+        }
+        val kept = mutableListOf<ReadingSessionEntity>()
+        for (session in sortedBy { it.startedAt }) {
+            val spans = spansByBook.getOrPut(session.bookId) { mutableListOf() }
+            val overlaps = spans.any { (start, end) ->
+                session.startedAt <= end && start <= session.timestamp
+            }
+            if (!overlaps) {
+                spans += session.startedAt to session.timestamp
+                kept += session
+            }
+        }
+        return kept
+    }
 
     private fun BookStatsSnapshot.isNewerThan(local: BookEntity): Boolean {
         val theirs = lastRead ?: return false

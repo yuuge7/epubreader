@@ -31,6 +31,7 @@ fun StatsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToMonthlyHistory: () -> Unit,
     onNavigateToYearlyHistory: () -> Unit,
+    onNavigateToSessionHistory: () -> Unit,
     viewModel: StatsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -199,12 +200,20 @@ fun StatsScreen(
                     }
 
                     item {
-                        Text(
-                            "Recent Sessions",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Recent Sessions",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = onNavigateToSessionHistory) {
+                                Text("Full history")
+                            }
+                        }
                     }
 
                     if (uiState.recentSessions.isEmpty()) {
@@ -395,7 +404,8 @@ private fun LeaderboardItem(stat: com.ebookreader.domain.model.BookReadingStat) 
 
 @Composable
 private fun SessionItem(session: com.ebookreader.domain.model.ReadingSession) {
-    val dateFormat = remember { SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault()) }
+    val dayFormat = remember { SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()) }
+    val clockFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -420,7 +430,8 @@ private fun SessionItem(session: com.ebookreader.domain.model.ReadingSession) {
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
                 Text(
-                    dateFormat.format(session.timestamp),
+                    "${dayFormat.format(session.startedAt)} · " +
+                        "${clockFormat.format(session.startedAt)}–${clockFormat.format(session.endedAt)}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

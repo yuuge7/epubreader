@@ -13,7 +13,12 @@ import org.json.JSONObject
 object StatsBackupCodec {
 
     const val SCHEMA = "ebookreader.stats"
-    const val VERSION = 1
+
+    /**
+     * 1: sessions carried only an end timestamp.
+     * 2: sessions carry `startedAt` as well, since a sitting now has a real span.
+     */
+    const val VERSION = 2
     const val MIME_TYPE = "application/json"
 
     class InvalidBackupException(message: String) : Exception(message)
@@ -54,6 +59,7 @@ object StatsBackupCodec {
                     put("bookTitle", session.bookTitle)
                     put("bookAuthor", session.bookAuthor)
                     put("durationSeconds", session.durationSeconds)
+                    put("startedAt", session.startedAt)
                     put("timestamp", session.timestamp)
                 }
             )
@@ -100,11 +106,17 @@ object StatsBackupCodec {
         }.filter { it.title.isNotBlank() }
 
         val sessions = root.optJSONArray("sessions").mapObjects { obj ->
+            val endedAt = obj.optLong("timestamp", 0L)
+            val duration = obj.optLong("durationSeconds", 0L)
             SessionSnapshot(
                 bookTitle = obj.optString("bookTitle"),
                 bookAuthor = obj.optString("bookAuthor"),
-                durationSeconds = obj.optLong("durationSeconds", 0L),
-                timestamp = obj.optLong("timestamp", 0L)
+                durationSeconds = duration,
+                // Format 1 stored only the end. Working back from it is the same estimate
+                // the v4 -> v5 database migration makes for rows of that vintage.
+                startedAt = obj.optLong("startedAt", 0L)
+                    .takeIf { it > 0L } ?: (endedAt - duration * 1000L),
+                timestamp = endedAt
             )
         }.filter { it.durationSeconds > 0 && it.timestamp > 0 }
 
