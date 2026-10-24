@@ -24,6 +24,8 @@ import com.ebookreader.presentation.common.formatSessionTime
 import com.ebookreader.presentation.common.formatTotalReadingTime
 import java.text.SimpleDateFormat
 import java.util.*
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.BinderyCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,7 +74,7 @@ fun StatsScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
-                title = { Text("Reading Stats", fontWeight = FontWeight.Bold) },
+                title = { Text("Reading Stats") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -136,8 +138,7 @@ fun StatsScreen(
                     item {
                         Text(
                             "Overview",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold
+                            style = MaterialTheme.typography.titleLarge
                         )
                     }
 
@@ -176,7 +177,6 @@ fun StatsScreen(
                             Text(
                                 "Top Books (This Month)",
                                 style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(top = 8.dp)
                             )
                         }
@@ -190,7 +190,6 @@ fun StatsScreen(
                             Text(
                                 "Top Books (All Time)",
                                 style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(top = 8.dp)
                             )
                         }
@@ -207,7 +206,6 @@ fun StatsScreen(
                             Text(
                                 "Recent Sessions",
                                 style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f)
                             )
                             TextButton(onClick = onNavigateToSessionHistory) {
@@ -339,11 +337,8 @@ private fun StatCard(
     icon: ImageVector,
     modifier: Modifier = Modifier
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
+    BinderyCard(
+        modifier = modifier
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Icon(
@@ -360,8 +355,7 @@ private fun StatCard(
             )
             Text(
                 value,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
+                style = Bindery.type.numeral,
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
@@ -370,9 +364,8 @@ private fun StatCard(
 
 @Composable
 private fun LeaderboardItem(stat: com.ebookreader.domain.model.BookReadingStat) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    BinderyCard(
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -386,16 +379,14 @@ private fun LeaderboardItem(stat: com.ebookreader.domain.model.BookReadingStat) 
             Spacer(Modifier.width(16.dp))
             Text(
                 stat.bookTitle,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
+                style = Bindery.type.bookTitle,
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
             )
             Text(
                 formatTotalReadingTime(stat.durationSeconds),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
+                style = Bindery.type.numeralSmall,
                 color = MaterialTheme.colorScheme.primary
             )
         }
@@ -407,9 +398,8 @@ private fun SessionItem(session: com.ebookreader.domain.model.ReadingSession) {
     val dayFormat = remember { SimpleDateFormat("MMM dd, yyyy", Locale.getDefault()) }
     val clockFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    BinderyCard(
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -424,8 +414,7 @@ private fun SessionItem(session: com.ebookreader.domain.model.ReadingSession) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     session.bookTitle,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
+                    style = Bindery.type.bookTitle,
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
@@ -438,8 +427,7 @@ private fun SessionItem(session: com.ebookreader.domain.model.ReadingSession) {
             }
             Text(
                 formatSessionTime(session.durationSeconds),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
+                style = Bindery.type.numeralSmall,
                 color = MaterialTheme.colorScheme.primary
             )
         }

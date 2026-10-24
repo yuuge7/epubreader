@@ -21,12 +21,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.BinderyCard
+import com.ebookreader.presentation.common.ForeEdge
 import com.ebookreader.presentation.common.formatTotalReadingTime
 import com.ebookreader.domain.model.*
 import kotlin.math.roundToInt
@@ -81,7 +83,7 @@ fun LibraryScreen(
                 )
             } else {
                 TopAppBar(
-                    title = { Text("My Library", fontWeight = FontWeight.Bold) },
+                    title = { Text("My Library") },
                     actions = {
                         IconButton(onClick = viewModel::toggleSearch) {
                             Icon(Icons.Default.Search, contentDescription = "Search")
@@ -365,82 +367,68 @@ private fun BookGridItem(
     onFavoriteClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    BinderyCard(
         modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
-            ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            )
     ) {
         Column {
-            Box {
+            Box(Modifier.fillMaxWidth().height(180.dp)) {
                 if (book.coverPath != null) {
                     AsyncImage(
                         model = book.coverPath,
                         contentDescription = book.title,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
+                        modifier = Modifier.fillMaxSize()
                     )
                 } else {
                     BookCoverPlaceholder(
                         title = book.title,
                         format = book.format,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
 
-                // Format badge
-                Surface(
-                    modifier = Modifier
+                FormatBadge(
+                    book.format,
+                    Modifier
                         .align(Alignment.TopStart)
-                        .padding(8.dp),
-                    color = if (book.format == BookFormat.PDF)
-                        MaterialTheme.colorScheme.error
-                    else
-                        MaterialTheme.colorScheme.primary,
-                    shape = RoundedCornerShape(4.dp),
-                    tonalElevation = 2.dp
-                ) {
-                    Text(
-                        book.format.name,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
+                        .padding(8.dp)
+                )
 
                 // Favorite button
                 IconButton(
                     onClick = onFavoriteClick,
-                    modifier = Modifier.align(Alignment.TopEnd)
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(end = 4.dp)
                 ) {
                     Icon(
                         if (book.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                        contentDescription = "Favorite",
-                        tint = if (book.isFavorite) Color.Red else Color.White
+                        contentDescription = favoriteLabel(book),
+                        tint = when {
+                            book.isFavorite -> MaterialTheme.colorScheme.primary
+                            // White reads on cover art; the plain placeholder is pale.
+                            book.coverPath == null -> MaterialTheme.colorScheme.onPrimaryContainer
+                            else -> Color.White
+                        }
                     )
                 }
-            }
 
-            // Reading progress
-            if (book.readingProgress > 0f) {
-                LinearProgressIndicator(
-                    progress = { book.readingProgress },
-                    modifier = Modifier.fillMaxWidth()
+                // Progress is the book's own fore-edge, not a bar under it.
+                ForeEdge(
+                    progress = book.readingProgress,
+                    modifier = Modifier.align(Alignment.CenterEnd)
                 )
             }
 
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
                     book.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
+                    style = Bindery.type.bookTitle,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -453,10 +441,11 @@ private fun BookGridItem(
                 )
                 val readTime = formatTotalReadingTime(book.totalReadingSeconds)
                 if (readTime.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
                     Text(
-                        "⏱ $readTime",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)
+                        "$readTime read",
+                        style = Bindery.type.numeralCaption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -473,7 +462,7 @@ private fun BookListItem(
     onFavoriteClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Card(
+    BinderyCard(
         modifier = modifier
             .fillMaxWidth()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
@@ -483,42 +472,36 @@ private fun BookListItem(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Cover or placeholder
-            if (book.coverPath != null) {
-                AsyncImage(
-                    model = book.coverPath,
-                    contentDescription = book.title,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(60.dp, 80.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                )
-            } else {
-                BookCoverPlaceholder(
-                    title = book.title,
-                    format = book.format,
-                    modifier = Modifier
-                        .size(60.dp, 80.dp)
-                        .clip(RoundedCornerShape(6.dp))
+            // Cover or placeholder, with its fore-edge
+            Box(
+                Modifier
+                    .size(60.dp, 80.dp)
+                    .clip(RoundedCornerShape(4.dp))
+            ) {
+                if (book.coverPath != null) {
+                    AsyncImage(
+                        model = book.coverPath,
+                        contentDescription = book.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    BookCoverPlaceholder(
+                        title = book.title,
+                        format = book.format,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                ForeEdge(
+                    progress = book.readingProgress,
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                    thickness = 3.dp
                 )
             }
 
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        color = if (book.format == BookFormat.PDF)
-                            MaterialTheme.colorScheme.error
-                        else
-                            MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(4.dp)
-                    ) {
-                        Text(
-                            book.format.name,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                        )
-                    }
+                    FormatBadge(book.format)
                     Spacer(Modifier.width(8.dp))
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -533,17 +516,16 @@ private fun BookListItem(
                         if (readTime.isNotEmpty()) {
                             Text("·", style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("⏱ $readTime",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f))
+                            Text("$readTime read",
+                                style = Bindery.type.numeralCaption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     book.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
+                    style = MaterialTheme.typography.titleMedium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -555,14 +537,10 @@ private fun BookListItem(
                     overflow = TextOverflow.Ellipsis
                 )
                 if (book.readingProgress > 0f) {
-                    Spacer(Modifier.height(6.dp))
-                    LinearProgressIndicator(
-                        progress = { book.readingProgress },
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         "${(book.readingProgress * 100).roundToInt()}%",
-                        style = MaterialTheme.typography.labelSmall,
+                        style = Bindery.type.numeralCaption,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -571,8 +549,9 @@ private fun BookListItem(
             IconButton(onClick = onFavoriteClick) {
                 Icon(
                     if (book.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                    contentDescription = "Favorite",
-                    tint = if (book.isFavorite) Color.Red else MaterialTheme.colorScheme.onSurfaceVariant
+                    contentDescription = favoriteLabel(book),
+                    tint = if (book.isFavorite) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -587,10 +566,7 @@ private fun BookCoverPlaceholder(
 ) {
     Surface(
         modifier = modifier,
-        color = if (format == BookFormat.PDF)
-            MaterialTheme.colorScheme.errorContainer
-        else
-            MaterialTheme.colorScheme.primaryContainer
+        color = MaterialTheme.colorScheme.primaryContainer
     ) {
         Box(contentAlignment = Alignment.Center) {
             Column(
@@ -602,10 +578,7 @@ private fun BookCoverPlaceholder(
                     if (format == BookFormat.PDF) Icons.Default.PictureAsPdf else Icons.AutoMirrored.Filled.MenuBook,
                     contentDescription = null,
                     modifier = Modifier.size(32.dp),
-                    tint = if (format == BookFormat.PDF)
-                        MaterialTheme.colorScheme.onErrorContainer
-                    else
-                        MaterialTheme.colorScheme.onPrimaryContainer
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
@@ -613,15 +586,37 @@ private fun BookCoverPlaceholder(
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    color = if (format == BookFormat.PDF)
-                        MaterialTheme.colorScheme.onErrorContainer
-                    else
-                        MaterialTheme.colorScheme.onPrimaryContainer
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }
         }
     }
 }
+
+/**
+ * The file type, as a neutral ink label. It used to borrow the error colour for PDF and
+ * white text on the accent, which failed contrast on pale dynamic themes.
+ */
+@Composable
+private fun FormatBadge(format: BookFormat, modifier: Modifier = Modifier) {
+    val colors = Bindery.colors
+    Surface(
+        modifier = modifier,
+        color = colors.ink.copy(alpha = 0.82f),
+        contentColor = colors.paper,
+        shape = RoundedCornerShape(3.dp)
+    ) {
+        Text(
+            format.name,
+            style = Bindery.type.eyebrow,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+        )
+    }
+}
+
+/** Says which way the toggle currently points, so TalkBack can announce the state. */
+private fun favoriteLabel(book: Book) =
+    if (book.isFavorite) "Remove from favourites" else "Add to favourites"
 
 @Composable
 private fun EmptyLibraryPlaceholder(onImport: () -> Unit) {

@@ -10,6 +10,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.ebookreader.domain.model.AppSettings
+import com.ebookreader.presentation.common.ReaderTheme
 import com.ebookreader.presentation.library.LibraryScreen
 import com.ebookreader.presentation.onboarding.OnboardingScreen
 import com.ebookreader.presentation.reader.epub.EpubReaderScreen
@@ -90,11 +91,12 @@ fun AppNavigation(
             arguments = listOf(navArgument("bookId") { type = NavType.LongType })
         ) { backStackEntry ->
             val bookId = backStackEntry.arguments?.getLong("bookId") ?: return@composable
-            PdfReaderScreen(
-                bookId = bookId,
-                settings = settings,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            ReaderTheme(settings.theme, settings.readingTheme) {
+                PdfReaderScreen(
+                    bookId = bookId,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -102,11 +104,13 @@ fun AppNavigation(
             arguments = listOf(navArgument("bookId") { type = NavType.LongType })
         ) { backStackEntry ->
             val bookId = backStackEntry.arguments?.getLong("bookId") ?: return@composable
-            EpubReaderScreen(
-                bookId = bookId,
-                settings = settings,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            ReaderTheme(settings.theme, settings.readingTheme) {
+                EpubReaderScreen(
+                    bookId = bookId,
+                    settings = settings,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(Screen.Settings.route) {

@@ -3,6 +3,7 @@ package com.ebookreader.presentation.reader.epub
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ebookreader.data.epub.EpubParser
+import com.ebookreader.data.epub.insertIntoHead
 import com.ebookreader.di.ApplicationScope
 import com.ebookreader.domain.model.Bookmark
 import com.ebookreader.domain.model.EpubChapter
@@ -287,9 +288,7 @@ class EpubReaderViewModel @Inject constructor(
                 }
             </style>
         """.trimIndent()
-        return if (html.contains("<head>", ignoreCase = true))
-            html.replace(Regex("<head>", RegexOption.IGNORE_CASE), "<head>\n$style")
-        else "<html><head>$style</head><body>$html</body></html>"
+        return insertIntoHead(html, style)
     }
 
     private suspend fun loadBookmarks() {

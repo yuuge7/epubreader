@@ -16,11 +16,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import kotlinx.coroutines.launch
@@ -29,7 +27,6 @@ data class OnboardingPage(
     val title: String,
     val description: String,
     val icon: ImageVector,
-    val gradient: List<Color>,
 )
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -168,11 +165,7 @@ private fun OnboardingPageContent(page: OnboardingPage) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(
-                Brush.verticalGradient(
-                    colors = page.gradient + listOf(MaterialTheme.colorScheme.background)
-                )
-            )
+            .background(MaterialTheme.colorScheme.background)
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -183,23 +176,17 @@ private fun OnboardingPageContent(page: OnboardingPage) {
         Box(
             modifier = Modifier
                 .size(160.dp)
+                // Read at layout, so the bobbing does not recompose the page every frame.
+                .offset { IntOffset(0, iconOffset.dp.roundToPx()) }
                 .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            page.gradient.first().copy(alpha = 0.8f),
-                            page.gradient.last().copy(alpha = 0.3f)
-                        )
-                    )
-                )
-                .offset(y = iconOffset.dp),
+                .background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 page.icon,
                 contentDescription = null,
-                modifier = Modifier.size(80.dp),
-                tint = Color.White
+                modifier = Modifier.size(72.dp),
+                tint = MaterialTheme.colorScheme.primary
             )
         }
 
@@ -208,7 +195,6 @@ private fun OnboardingPageContent(page: OnboardingPage) {
         Text(
             page.title,
             style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onBackground
         )
@@ -219,7 +205,7 @@ private fun OnboardingPageContent(page: OnboardingPage) {
             page.description,
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             lineHeight = MaterialTheme.typography.bodyLarge.lineHeight
         )
 
@@ -234,29 +220,17 @@ private fun rememberOnboardingPages(): List<OnboardingPage> {
             OnboardingPage(
                 title = "Your Digital Library",
                 description = "Import and organize all your PDF and EPUB books in one beautiful place. Your entire library, always at your fingertips.",
-                icon = Icons.AutoMirrored.Filled.LibraryBooks,
-                gradient = listOf(
-                    Color(0xFF6650A4),
-                    Color(0xFF7965AF)
-                )
+                icon = Icons.AutoMirrored.Filled.LibraryBooks
             ),
             OnboardingPage(
                 title = "Read Your Way",
-                description = "Smooth PDF rendering with pinch-to-zoom, plus full EPUB support with chapter navigation. Choose your theme: light, dark, or sepia.",
-                icon = Icons.Default.AutoStories,
-                gradient = listOf(
-                    Color(0xFF0061A4),
-                    Color(0xFF1B74BC)
-                )
+                description = "Smooth PDF rendering with pinch-to-zoom, plus full EPUB support with chapter navigation. Read on paper, sepia, slate or night pages.",
+                icon = Icons.Default.AutoStories
             ),
             OnboardingPage(
                 title = "Never Lose Your Place",
                 description = "Bookmarks, reading progress, and chapter history are saved automatically. Pick up exactly where you left off, every time.",
-                icon = Icons.Default.Bookmark,
-                gradient = listOf(
-                    Color(0xFF006E1C),
-                    Color(0xFF1E8733)
-                )
+                icon = Icons.Default.Bookmark
             )
         )
     }

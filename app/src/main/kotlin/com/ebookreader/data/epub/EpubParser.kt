@@ -199,18 +199,18 @@ class EpubParser @Inject constructor(private val context: Context) {
         }
 
     private fun injectReaderStyles(html: String): String {
+        // Colours, link colour included, are left to the reader, which sets them from the
+        // reading theme by extending this tag.
         val style = """
             <style id="epub-reader-base">
                 body { font-family: Georgia, serif; line-height: 1.7; padding: 16px; margin: 0; word-wrap: break-word; }
                 img { max-width: 100%; height: auto; }
                 p { margin: 0 0 1em 0; }
                 h1,h2,h3,h4,h5,h6 { line-height: 1.3; }
-                a { color: #6650A4; text-decoration: underline; }
+                a { text-decoration: underline; }
             </style>
         """.trimIndent()
-        return if (html.contains("<head>", ignoreCase = true))
-            html.replace(Regex("<head>", RegexOption.IGNORE_CASE), "<head>\n$style")
-        else "<html><head>$style</head><body>$html</body></html>"
+        return insertIntoHead(html, style)
     }
 
     /**
@@ -252,4 +252,18 @@ class EpubParser @Inject constructor(private val context: Context) {
     fun clearCache(filePath: String) {
         extractDirFor(File(filePath)).deleteRecursively()
     }
+}
+
+/** An opening head tag, with or without attributes; never <header>. */
+private val HeadTag = Regex("""<head(\s[^>]*)?>""", RegexOption.IGNORE_CASE)
+
+/**
+ * Puts [markup] at the top of the document's head. Matches `<head profile="…">` and the
+ * like too: a literal "<head>" test missed those, and the chapter was then wrapped in a
+ * second html document, losing the injected viewport and styles.
+ */
+internal fun insertIntoHead(html: String, markup: String): String {
+    val head = HeadTag.find(html) ?: return "<html><head>$markup</head><body>$html</body></html>"
+    val afterTag = head.range.last + 1
+    return html.substring(0, afterTag) + "\n" + markup + html.substring(afterTag)
 }

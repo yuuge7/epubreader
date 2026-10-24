@@ -1,3 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- The window behind Compose, seen during launch: the "paper" token. -->
+    <color name="window_paper">#FBF9F4</color>
 </resources>

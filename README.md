@@ -14,7 +14,9 @@ An offline-first Android reader for EPUB and PDF books, with a library manager, 
 **Reading**
 - EPUB and PDF in a single library
 - Resumes exactly where you stopped — chapter *and* scroll offset within it
-- Light, dark and sepia themes; adjustable font size
+- Reading themes chosen apart from the app theme: Paper, Sepia, Slate, Night and Black pages,
+  or Auto to follow the app; the reader's bars and sheets take the page's colours
+- Adjustable font size
 - Table of contents, internal link navigation and chapter scrubbing for EPUB
 - Pinch-to-zoom and page scrubbing for PDF
 - Bookmarks with optional notes
@@ -24,6 +26,13 @@ An offline-first Android reader for EPUB and PDF books, with a library manager, 
 - Metadata, author and cover art read from the EPUB itself
 - Grid and list layouts, search, sort by title/author/date/last read
 - Filter by format, favourites or reading status
+
+**Design**
+- App theme: Auto, Light, Dark or Black (true black for OLED). No wallpaper-derived colour:
+  the palette is fixed and contrast-tested (`BinderyContrastTest`)
+- Each book's progress is drawn as its fore-edge, the ruled block of page edges on the
+  right of its cover, stained as it is read
+- Literata for titles, Inter Tight for the interface, IBM Plex Mono for figures, all bundled
 
 **Statistics**
 - Per-session and per-book reading time, counted only while the app is in the foreground
@@ -88,7 +97,7 @@ app/src/main/kotlin/com/ebookreader/
 │   ├── reader/pdf/    PdfRendererView-based PDF reader
 │   ├── settings/      Settings
 │   ├── stats/         Statistics and history
-│   └── common/        Theme and shared helpers
+│   └── common/        Design tokens (Bindery*), fore-edge, theme and shared helpers
 └── di/                Hilt modules
 ```
 
@@ -196,3 +205,11 @@ Good places to start: R8/minification rules for release builds, horizontal paged
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Bundled fonts are under the SIL Open Font License 1.1; their licence texts ship in the app at
+`app/src/main/assets/licenses/`:
+
+- [Literata](https://github.com/googlefonts/literata) — trimmed to Latin, Greek and Cyrillic and to
+  weights 400–700 to keep the APK small
+- [Inter Tight](https://github.com/rsms/inter) — trimmed the same way
+- [IBM Plex Mono](https://github.com/IBM/plex) Medium — unmodified, as its licence reserves the name

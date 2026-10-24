@@ -9,11 +9,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ebookreader.presentation.common.formatTotalReadingTime
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.BinderyCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -26,7 +27,7 @@ fun YearlyHistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Yearly History", fontWeight = FontWeight.Bold) },
+                title = { Text("Yearly History") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -53,11 +54,8 @@ fun YearlyHistoryScreen(
                     }
                 } else {
                     items(uiState.yearlyHistory) { year ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                            )
+                        BinderyCard(
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier.padding(16.dp),
@@ -68,13 +66,11 @@ fun YearlyHistoryScreen(
                                 Text(
                                     year.year.toString(),
                                     style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Text(
                                     formatTotalReadingTime(year.totalSeconds),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
+                                    style = Bindery.type.numeral,
                                     color = MaterialTheme.colorScheme.primary,
                                     maxLines = 1
                                 )

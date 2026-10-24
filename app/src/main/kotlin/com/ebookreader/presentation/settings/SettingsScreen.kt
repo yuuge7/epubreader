@@ -11,10 +11,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.ebookreader.BuildConfig
 import com.ebookreader.domain.model.*
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.ReadingThemePicker
+import com.ebookreader.presentation.common.label
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -26,7 +29,7 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings", fontWeight = FontWeight.Bold) },
+                title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -44,10 +47,22 @@ fun SettingsScreen(
             // ── Appearance ────────────────────────────────────────────────
             SettingsSectionHeader("Appearance", Icons.Default.Palette)
 
-            SettingsItem("Theme", settings.theme.displayName, Icons.Default.DarkMode) {
+            SettingsItem("App theme", settings.theme.description, Icons.Default.DarkMode) {
                 ThemeSelector(
                     currentTheme = settings.theme
                 ) { onSettingsChange(settings.copy(theme = it)) }
+            }
+
+            SettingsItem(
+                "Reading theme",
+                settings.readingTheme.description,
+                Icons.AutoMirrored.Filled.MenuBook
+            ) {
+                ReadingThemePicker(
+                    selected = settings.readingTheme,
+                    appTheme = settings.theme,
+                    onSelect = { onSettingsChange(settings.copy(readingTheme = it)) }
+                )
             }
 
             // Track the drag locally. Writing on every onValueChange put a DataStore write
@@ -74,7 +89,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text("A", style = MaterialTheme.typography.bodySmall)
-                        Text("A", style = MaterialTheme.typography.headlineSmall)
+                        Text("A", style = MaterialTheme.typography.bodyLarge.copy(fontSize = 24.sp))
                     }
                 }
             }
@@ -170,12 +185,11 @@ private fun SettingsSectionHeader(title: String, icon: ImageVector) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
         Text(
-            title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold
+            title.uppercase(),
+            style = Bindery.type.eyebrow,
+            color = MaterialTheme.colorScheme.primary
         )
     }
 }
@@ -308,7 +322,21 @@ private fun SortSelector(currentSort: SortOption, onSortSelected: (SortOption) -
 // Extension display names
 private val AppTheme.displayName get() = when (this) {
     AppTheme.SYSTEM -> "Auto"; AppTheme.LIGHT -> "Light"
-    AppTheme.DARK -> "Dark"; AppTheme.SEPIA -> "Sepia"
+    AppTheme.DARK -> "Dark"; AppTheme.BLACK -> "Black"
+}
+private val AppTheme.description get() = when (this) {
+    AppTheme.SYSTEM -> "Follows the system: light by day, dark at night"
+    AppTheme.LIGHT -> "Always light"
+    AppTheme.DARK -> "Always dark"
+    AppTheme.BLACK -> "Dark, on true black for OLED screens"
+}
+private val ReadingTheme.description get() = when (this) {
+    ReadingTheme.AUTO -> "Matches the app: light pages in light, dark pages in dark"
+    ReadingTheme.PAPER -> "$label — dark ink on warm white"
+    ReadingTheme.SEPIA -> "$label — brown ink on aged paper"
+    ReadingTheme.SLATE -> "$label — soft grey page for dim rooms"
+    ReadingTheme.NIGHT -> "$label — light ink on near-black"
+    ReadingTheme.BLACK -> "$label — dimmed ink on true black"
 }
 private val SortOption.displayName get() = when (this) {
     SortOption.TITLE -> "Title"; SortOption.AUTHOR -> "Author"

@@ -25,6 +25,9 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import androidx.compose.ui.unit.sp
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.BinderyCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,7 +40,7 @@ fun SessionHistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Reading History", fontWeight = FontWeight.Bold) },
+                title = { Text("Reading History") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -87,17 +90,13 @@ fun SessionHistoryScreen(
 @Composable
 private fun HistorySummary(state: SessionHistoryUiState) {
     val dayFormat = remember { SimpleDateFormat("d MMM yyyy", Locale.getDefault()) }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        )
+    BinderyCard(
+        modifier = Modifier.fillMaxWidth()
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 formatTotalReadingTime(state.totalSeconds).ifBlank { "0m" },
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
+                style = Bindery.type.numeral.copy(fontSize = 26.sp, lineHeight = 30.sp)
             )
             val sittings = if (state.sittingCount == 1) "1 sitting" else "${state.sittingCount} sittings"
             Text(
@@ -166,9 +165,8 @@ private fun DayHeader(day: SessionDay) {
         )
         Text(
             formatTotalReadingTime(day.totalSeconds).ifBlank { "0m" },
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold
+            style = Bindery.type.numeralSmall,
+            color = MaterialTheme.colorScheme.primary
         )
     }
 }
@@ -176,9 +174,8 @@ private fun DayHeader(day: SessionDay) {
 @Composable
 private fun SessionRow(session: ReadingSession, showBookTitle: Boolean) {
     val clockFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    BinderyCard(
+        modifier = Modifier.fillMaxWidth()
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -188,8 +185,7 @@ private fun SessionRow(session: ReadingSession, showBookTitle: Boolean) {
                 if (showBookTitle) {
                     Text(
                         session.bookTitle,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
+                        style = Bindery.type.bookTitle,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -204,8 +200,7 @@ private fun SessionRow(session: ReadingSession, showBookTitle: Boolean) {
             }
             Text(
                 formatSessionTime(session.durationSeconds),
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Bold,
+                style = Bindery.type.numeralSmall,
                 color = MaterialTheme.colorScheme.primary
             )
         }
