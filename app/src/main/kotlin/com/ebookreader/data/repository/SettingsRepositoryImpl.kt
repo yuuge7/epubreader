@@ -48,7 +48,16 @@ internal object SettingsKeys {
     val HYPHENATE = booleanPreferencesKey("hyphenate")
     val READER_BRIGHTNESS = floatPreferencesKey("reader_brightness")
     val READER_WARMTH = floatPreferencesKey("reader_warmth")
+    val GOAL_MINUTES_DAY = intPreferencesKey("goal_minutes_day")
+    val GOAL_BOOKS_YEAR = intPreferencesKey("goal_books_year")
+    val REMINDER = booleanPreferencesKey("reminder_enabled")
+    val REMINDER_AT = intPreferencesKey("reminder_at")
+    val READ_ALOUD_RATE = floatPreferencesKey("read_aloud_rate")
+    val SYNC_FOLDER = stringPreferencesKey("sync_folder")
     val KEEP_SCREEN_ON = booleanPreferencesKey("keep_screen_on")
+    val COMIC_RIGHT_TO_LEFT = booleanPreferencesKey("comic_right_to_left")
+    /** One catalogue a line, its title and address separated by a tab. */
+    val CATALOGS = stringPreferencesKey("opds_catalogs")
     val SORT_OPTION = stringPreferencesKey("sort_option")
     val FILTER_OPTION = stringPreferencesKey("filter_option")
     val IS_GRID_VIEW = booleanPreferencesKey("is_grid_view")
@@ -86,7 +95,20 @@ internal fun settingsFrom(prefs: Preferences): AppSettings {
             brightness = prefs[SettingsKeys.READER_BRIGHTNESS] ?: light.brightness,
             warmth = prefs[SettingsKeys.READER_WARMTH] ?: light.warmth,
         ).sanitized(),
+        goals = ReadingGoals(
+            minutesPerDay = prefs[SettingsKeys.GOAL_MINUTES_DAY] ?: 0,
+            booksPerYear = prefs[SettingsKeys.GOAL_BOOKS_YEAR] ?: 0,
+            reminder = prefs[SettingsKeys.REMINDER] ?: false,
+            reminderAt = prefs[SettingsKeys.REMINDER_AT] ?: ReadingGoals().reminderAt,
+        ).sanitized(),
+        readAloudRate = (prefs[SettingsKeys.READ_ALOUD_RATE] ?: 1f).coerceIn(0.5f, 3f),
+        syncFolder = prefs[SettingsKeys.SYNC_FOLDER],
         keepScreenOn = prefs[SettingsKeys.KEEP_SCREEN_ON] ?: false,
+        comicRightToLeft = prefs[SettingsKeys.COMIC_RIGHT_TO_LEFT] ?: false,
+        catalogs = prefs[SettingsKeys.CATALOGS].orEmpty().lines().mapNotNull { line ->
+            val (title, url) = line.split('\t', limit = 2).takeIf { it.size == 2 } ?: return@mapNotNull null
+            OpdsCatalog(title, url)
+        },
         sortOption = enumOr(prefs[SettingsKeys.SORT_OPTION], SortOption.DATE_ADDED),
         filterOption = enumOr(prefs[SettingsKeys.FILTER_OPTION], FilterOption.ALL),
         isGridView = prefs[SettingsKeys.IS_GRID_VIEW] ?: true,
@@ -109,7 +131,17 @@ private fun MutablePreferences.write(settings: AppSettings) {
     this[SettingsKeys.HYPHENATE] = type.hyphenate
     this[SettingsKeys.READER_BRIGHTNESS] = settings.readerLight.brightness
     this[SettingsKeys.READER_WARMTH] = settings.readerLight.warmth
+    this[SettingsKeys.GOAL_MINUTES_DAY] = settings.goals.minutesPerDay
+    this[SettingsKeys.GOAL_BOOKS_YEAR] = settings.goals.booksPerYear
+    this[SettingsKeys.REMINDER] = settings.goals.reminder
+    this[SettingsKeys.REMINDER_AT] = settings.goals.reminderAt
+    this[SettingsKeys.READ_ALOUD_RATE] = settings.readAloudRate
+    settings.syncFolder?.let { this[SettingsKeys.SYNC_FOLDER] = it } ?: remove(SettingsKeys.SYNC_FOLDER)
     this[SettingsKeys.KEEP_SCREEN_ON] = settings.keepScreenOn
+    this[SettingsKeys.COMIC_RIGHT_TO_LEFT] = settings.comicRightToLeft
+    this[SettingsKeys.CATALOGS] = settings.catalogs.joinToString("\n") { c ->
+        c.title.replace(Regex("""\s"""), " ") + "\t" + c.url.trim()
+    }
     this[SettingsKeys.SORT_OPTION] = settings.sortOption.name
     this[SettingsKeys.FILTER_OPTION] = settings.filterOption.name
     this[SettingsKeys.IS_GRID_VIEW] = settings.isGridView

@@ -6,7 +6,18 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ebookreader.data.backup.StatsBackupCodec
 import com.ebookreader.data.backup.StatsBackupManager
+import com.ebookreader.domain.model.Book
 import com.ebookreader.domain.model.BookReadingStat
+import com.ebookreader.domain.model.ReadingCalendar
+import com.ebookreader.domain.model.ReadingGoals
+import com.ebookreader.domain.model.ReadingStatus
+import com.ebookreader.domain.model.SortOption
+import com.ebookreader.domain.repository.SettingsRepository
+import com.ebookreader.data.reminders.ReadingReminders
+import com.ebookreader.presentation.common.YearInReading
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.ZoneId
 import com.ebookreader.domain.model.MonthSummary
 import com.ebookreader.domain.model.YearSummary
 import com.ebookreader.domain.model.ReadingSession
@@ -22,6 +33,19 @@ import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
+/** The calendar side of the stats: what the charts at the top of the screen draw. */
+data class ReadingDays(
+    val todaySeconds: Long = 0,
+    val currentStreak: Int = 0,
+    val longestStreak: Int = 0,
+    /** Every day from the Monday 52 weeks back to today, oldest first. */
+    val heatmap: List<Pair<LocalDate, Long>> = emptyList(),
+    val lastWeek: List<Pair<LocalDate, Long>> = emptyList(),
+    val lastYear: List<Pair<YearMonth, Long>> = emptyList(),
+    val booksFinishedThisYear: Int = 0,
+    val year: YearInReading? = null,
+)
+
 data class StatsUiState(
     val totalTimeSeconds: Long = 0,
     val monthlyTimeSeconds: Long = 0,
@@ -31,18 +55,25 @@ data class StatsUiState(
     val monthlyHistory: List<MonthSummary> = emptyList(),
     val yearlyHistory: List<YearSummary> = emptyList(),
     val recentSessions: List<ReadingSession> = emptyList(),
+    val days: ReadingDays = ReadingDays(),
+    val goals: ReadingGoals = ReadingGoals(),
     val isLoading: Boolean = true
 )
 
 @HiltViewModel
 class StatsViewModel @Inject constructor(
     private val bookRepository: BookRepository,
+    private val settingsRepository: SettingsRepository,
+    private val reminders: ReadingReminders,
     private val statsBackupManager: StatsBackupManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    val uiState: StateFlow<StatsUiState> = bookRepository.getAllReadingSessions()
-        .map { sessions ->
+    val uiState: StateFlow<StatsUiState> = combine(
+        bookRepository.getAllReadingSessions(),
+        bookRepository.getAllBooks(SortOption.DATE_ADDED),
+        settingsRepository.getSettings().map { it.goals }.distinctUntilChanged(),
+    ) { sessions, books, goals ->
             val startOfMonth = Calendar.getInstance().apply {
                 set(Calendar.DAY_OF_MONTH, 1)
                 set(Calendar.HOUR_OF_DAY, 0)
@@ -120,6 +151,8 @@ class StatsViewModel @Inject constructor(
             }.sortedByDescending { it.startTimestamp }
 
             StatsUiState(
+                days = readingDays(sessions, books),
+                goals = goals,
                 totalTimeSeconds = sessions.sumOf { it.durationSeconds },
                 monthlyTimeSeconds = sessions.filter { it.startedAt.time >= startOfMonth }.sumOf { it.durationSeconds },
                 yearlyTimeSeconds = sessions.filter { it.startedAt.time >= startOfYear }.sumOf { it.durationSeconds },
@@ -131,11 +164,53 @@ class StatsViewModel @Inject constructor(
                 isLoading = false
             )
         }
+        .flowOn(Dispatchers.Default)
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
             initialValue = StatsUiState()
         )
+
+    private fun readingDays(sessions: List<ReadingSession>, books: List<Book>): ReadingDays {
+        val calendar = ReadingCalendar(sessions)
+        val today = LocalDate.now()
+        val start = today.with(java.time.DayOfWeek.MONDAY).minusWeeks(52)
+        val heatmap = calendar.lastDays(today, java.time.temporal.ChronoUnit.DAYS.between(start, today).toInt() + 1)
+        val longestStreak = calendar.longestStreak()
+        val year = today.year
+        val finishedThisYear = books.filter { book ->
+            book.readingStatus == ReadingStatus.FINISHED &&
+                book.lastRead?.let { java.time.Instant.ofEpochMilli(it.time).atZone(ZoneId.systemDefault()).year } == year
+        }
+        val topBook = sessions
+            .filter { java.time.Instant.ofEpochMilli(it.startedAt.time).atZone(ZoneId.systemDefault()).year == year }
+            .groupBy { it.bookTitle }
+            .maxByOrNull { (_, s) -> s.sumOf { it.durationSeconds } }?.key
+        return ReadingDays(
+            todaySeconds = calendar.secondsOn(today),
+            currentStreak = calendar.currentStreak(today),
+            longestStreak = longestStreak,
+            heatmap = heatmap,
+            lastWeek = calendar.lastDays(today, 7),
+            lastYear = calendar.lastMonths(today, 12),
+            booksFinishedThisYear = finishedThisYear.size,
+            year = YearInReading(
+                year = year,
+                totalSeconds = calendar.secondsIn(year),
+                booksFinished = finishedThisYear.size,
+                daysRead = calendar.daysReadIn(year),
+                longestStreak = longestStreak,
+                topBook = topBook?.takeIf { it.isNotBlank() },
+            ),
+        )
+    }
+
+    fun setGoals(goals: ReadingGoals) {
+        viewModelScope.launch {
+            settingsRepository.editSettings { it.copy(goals = goals.sanitized()) }
+            reminders.schedule(goals.sanitized())
+        }
+    }
 
     // ── Backup ────────────────────────────────────────────────────────────────
 

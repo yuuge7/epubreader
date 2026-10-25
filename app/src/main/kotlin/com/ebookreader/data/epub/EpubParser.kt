@@ -106,6 +106,8 @@ class EpubParser(private val cacheDir: File) {
             title = opf.title, author = opf.author, chapters = chapters,
             coverImagePath = opf.coverImageHref?.let { File(opfDir, decodeHref(it)).absolutePath },
             language = opf.language,
+            series = opf.series,
+            seriesIndex = opf.seriesIndex,
         )
         return EpubParseResult(book, extractDir, chapterContents, chapterPaths, chapterWeights)
     }
@@ -128,6 +130,8 @@ class EpubParser(private val cacheDir: File) {
         val spineHrefs: List<Pair<String, String>>, val coverImageHref: String?,
         /** BCP 47 tag from dc:language; drives hyphenation in the reader. */
         val language: String?,
+        val series: String? = null,
+        val seriesIndex: Float? = null,
     )
 
     private fun parseOpf(content: String): OpfData {
@@ -135,6 +139,11 @@ class EpubParser(private val cacheDir: File) {
         val manifest = mutableMapOf<String, String>()
         val spine = mutableListOf<String>()
         var coverMetaId: String? = null; var coverImageHref: String? = null
+        // Calibre's <meta name="calibre:series">, or EPUB 3's belongs-to-collection
+        // refined by a group-position.
+        var series: String? = null; var seriesIndex: Float? = null
+        var collectionId: String? = null
+        val positions = mutableMapOf<String, Float>()
         var inMeta = false; var inManifest = false; var inSpine = false
         try {
             val factory = XmlPullParserFactory.newInstance().also { it.isNamespaceAware = true }
@@ -156,8 +165,27 @@ class EpubParser(private val cacheDir: File) {
                         "language", "dc:language" ->
                             if (inMeta && language == null)
                                 language = parser.nextText().trim().takeIf { it.isNotBlank() }
-                        "meta" -> if (inMeta && parser.getAttributeValue(null, "name") == "cover")
-                            coverMetaId = parser.getAttributeValue(null, "content")
+                        "meta" -> if (inMeta) {
+                            val name = parser.getAttributeValue(null, "name")
+                            val property = parser.getAttributeValue(null, "property")
+                            when {
+                                name == "cover" -> coverMetaId = parser.getAttributeValue(null, "content")
+                                name == "calibre:series" ->
+                                    series = parser.getAttributeValue(null, "content")?.trim()?.ifBlank { null }
+                                name == "calibre:series_index" ->
+                                    seriesIndex = parser.getAttributeValue(null, "content")?.toFloatOrNull()
+                                property == "belongs-to-collection" -> {
+                                    val id = parser.getAttributeValue(null, "id")
+                                    val text = parser.nextText().trim()
+                                    if (series == null && text.isNotEmpty()) { series = text; collectionId = id }
+                                }
+                                property == "group-position" -> {
+                                    val refines = parser.getAttributeValue(null, "refines")?.removePrefix("#")
+                                    val value = parser.nextText().trim().toFloatOrNull()
+                                    if (refines != null && value != null) positions[refines] = value
+                                }
+                            }
+                        }
                         "item" -> if (inManifest) {
                             val id = parser.getAttributeValue(null, "id") ?: ""
                             val href = parser.getAttributeValue(null, "href") ?: ""
@@ -181,8 +209,9 @@ class EpubParser(private val cacheDir: File) {
             }
         } catch (_: Exception) {}
         if (coverImageHref == null && coverMetaId != null) coverImageHref = manifest[coverMetaId]
+        if (seriesIndex == null) seriesIndex = collectionId?.let { positions[it] }
         val spineHrefs = spine.mapNotNull { id -> manifest[id]?.let { id to it } }
-        return OpfData(title, author, spineHrefs, coverImageHref, language)
+        return OpfData(title, author, spineHrefs, coverImageHref, language, series, seriesIndex)
     }
 
     /**
@@ -266,7 +295,9 @@ class EpubParser(private val cacheDir: File) {
         EpubMetadata(
             title = result.book.title,
             author = result.book.author,
-            coverImagePath = result.book.coverImagePath?.takeIf { File(it).exists() }
+            coverImagePath = result.book.coverImagePath?.takeIf { File(it).exists() },
+            series = result.book.series,
+            seriesIndex = result.book.seriesIndex,
         )
     } catch (_: Exception) {
         null
@@ -275,7 +306,9 @@ class EpubParser(private val cacheDir: File) {
     data class EpubMetadata(
         val title: String,
         val author: String,
-        val coverImagePath: String?
+        val coverImagePath: String?,
+        val series: String? = null,
+        val seriesIndex: Float? = null,
     )
 
     fun clearCache(filePath: String) {
@@ -310,59 +343,6 @@ internal fun decodeHref(href: String): String {
 }
 
 private fun Char.isHexDigit() = this in '0'..'9' || this in 'a'..'f' || this in 'A'..'F'
-
-/** Elements whose content is never shown as text. */
-private val HiddenElements = listOf("head", "script", "style")
-
-/**
- * Roughly how many characters a reader sees in [html]: markup, the head, scripts,
- * styles, comments and whitespace do not count, and an entity counts as the one
- * character it stands for. Only used to weigh chapters against each other, so rough is
- * enough. One pass and no copies, since it runs over every chapter each time a book opens.
- */
-internal fun visibleTextLength(html: String): Int {
-    var count = 0
-    var i = 0
-    val end = html.length
-    while (i < end) {
-        val c = html[i]
-        when {
-            html.startsWith("<!--", i) -> i = html.indexOf("-->", i + 4).let { if (it < 0) end else it + 3 }
-            c == '<' -> {
-                val hidden = HiddenElements.firstOrNull { html.opensElement(i, it) }
-                i = html.indexOf('>', i + 1).let { if (it < 0) end else it + 1 }
-                if (hidden != null) {
-                    val close = html.indexOf("</$hidden", i, ignoreCase = true)
-                    i = if (close < 0) end else html.indexOf('>', close).let { if (it < 0) end else it + 1 }
-                }
-            }
-            c == '&' -> {
-                count++
-                i = html.entityEnd(i) ?: (i + 1)
-            }
-            else -> {
-                if (!c.isWhitespace()) count++
-                i++
-            }
-        }
-    }
-    return count
-}
-
-/** Whether a start tag for [name] (and not, say, <header> for "head") begins at [at]. */
-private fun String.opensElement(at: Int, name: String): Boolean {
-    val after = at + 1 + name.length
-    return regionMatches(at + 1, name, 0, name.length, ignoreCase = true) &&
-        (after >= length || !this[after].isLetterOrDigit())
-}
-
-/** Just past the ";" of a character reference starting at [at], or null if there is none. */
-private fun String.entityEnd(at: Int): Int? {
-    val semi = indexOf(';', at + 1)
-    if (semi < at + 2 || semi > at + 12) return null
-    for (k in at + 1 until semi) if (!this[k].isLetterOrDigit() && this[k] != '#') return null
-    return semi + 1
-}
 
 /** Elements HTML defines as having no content; only these may legitimately end in "/>". */
 private val VoidElements = setOf(

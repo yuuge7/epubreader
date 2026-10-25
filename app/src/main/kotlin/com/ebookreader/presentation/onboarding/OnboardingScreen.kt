@@ -219,17 +219,17 @@ private fun rememberOnboardingPages(): List<OnboardingPage> {
         listOf(
             OnboardingPage(
                 title = "Your Digital Library",
-                description = "Import and organize all your PDF and EPUB books in one beautiful place. Your entire library, always at your fingertips.",
+                description = "EPUB, PDF, comics, Kindle, FB2 and text books in one library, or free classics straight from Project Gutenberg's catalogue.",
                 icon = Icons.AutoMirrored.Filled.LibraryBooks
             ),
             OnboardingPage(
                 title = "Read Your Way",
-                description = "Smooth PDF rendering with pinch-to-zoom, plus full EPUB support with chapter navigation. Read on paper, sepia, slate or night pages.",
+                description = "Set the type and the page as you like, highlight and note passages, or have the book read aloud. Read on paper, sepia, slate or night pages.",
                 icon = Icons.Default.AutoStories
             ),
             OnboardingPage(
                 title = "Never Lose Your Place",
-                description = "Bookmarks, reading progress, and chapter history are saved automatically. Pick up exactly where you left off, every time.",
+                description = "Your place, bookmarks and reading time are kept as you read, and can follow you to your other devices. Pick up exactly where you left off.",
                 icon = Icons.Default.Bookmark
             )
         )

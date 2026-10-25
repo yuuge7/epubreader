@@ -4,6 +4,10 @@ import androidx.room.withTransaction
 import com.ebookreader.BuildConfig
 import com.ebookreader.data.local.AppDatabase
 import com.ebookreader.data.local.dao.BookDao
+import com.ebookreader.data.local.dao.HighlightDao
+import com.ebookreader.data.local.entity.HighlightEntity
+import com.ebookreader.domain.model.HighlightColor
+import com.ebookreader.domain.model.HighlightSnapshot
 import com.ebookreader.data.local.dao.ReadingSessionDao
 import com.ebookreader.data.local.entity.BookEntity
 import com.ebookreader.data.local.entity.ReadingSessionEntity
@@ -31,7 +35,8 @@ import kotlin.math.absoluteValue
 class StatsBackupManager @Inject constructor(
     private val database: AppDatabase,
     private val bookDao: BookDao,
-    private val sessionDao: ReadingSessionDao
+    private val sessionDao: ReadingSessionDao,
+    private val highlightDao: HighlightDao,
 ) {
 
     suspend fun export(): StatsBackup {
@@ -53,7 +58,21 @@ class StatsBackupManager @Inject constructor(
                     startedAt = session.startedAt,
                     timestamp = session.timestamp
                 )
-            }
+            },
+            highlights = highlightDao.getAllOnce().mapNotNull { h ->
+                val book = booksById[h.bookId] ?: return@mapNotNull null
+                HighlightSnapshot(
+                    bookTitle = book.title,
+                    bookAuthor = book.author,
+                    chapterIndex = h.chapterIndex,
+                    startOffset = h.startOffset,
+                    endOffset = h.endOffset,
+                    text = h.text,
+                    note = h.note,
+                    color = h.toDomain().color.name,
+                    createdAt = h.createdAt,
+                )
+            },
         )
     }
 
@@ -69,13 +88,21 @@ class StatsBackupManager @Inject constructor(
     ): StatsImportResult = database.withTransaction {
         val localBooks = bookDao.getAllBooksOnce()
         val localIdByKey = localBooks.associate { bookMatchKey(it.title, it.author) to it.id }
+        val localIds = localBooks.mapTo(HashSet()) { it.id }
+        // A sitting whose book had gone from the device that wrote the file carries no
+        // author (the history outlives the book; its author does not). Its title still
+        // finds the book here when only one book has that title.
+        val localIdByTitle = localBooks.groupBy { it.title.trim().lowercase() }
+            .filterValues { it.size == 1 }.mapValues { it.value.single().id }
 
         // Resolve every incoming session to a book id before anything is written, so
         // duplicate detection and the per-book totals below agree on the same ids.
         val resolved = backup.sessions.map { session ->
             val key = bookMatchKey(session.bookTitle, session.bookAuthor)
             ReadingSessionEntity(
-                bookId = localIdByKey[key] ?: syntheticBookId(key),
+                bookId = localIdByKey[key]
+                    ?: localIdByTitle[session.bookTitle.trim().lowercase()].takeIf { session.bookAuthor.isBlank() }
+                    ?: syntheticBookId(key),
                 bookTitle = session.bookTitle.ifBlank { UNKNOWN_TITLE },
                 durationSeconds = session.durationSeconds,
                 startedAt = session.startedAt,
@@ -87,11 +114,11 @@ class StatsBackupManager @Inject constructor(
             StatsImportMode.REPLACE -> {
                 sessionDao.deleteAllSessions()
                 // Two exports of the same history can still overlap inside one file.
-                resolved.withoutOverlaps(emptyList())
+                resolved.withoutOverlaps(emptyList(), localIds)
             }
 
             StatsImportMode.MERGE -> {
-                resolved.withoutOverlaps(sessionDao.getAllSessionsOnce())
+                resolved.withoutOverlaps(sessionDao.getAllSessionsOnce(), localIds)
             }
         }
         val skipped = resolved.size - toInsert.size
@@ -141,7 +168,8 @@ class StatsBackupManager @Inject constructor(
                         progress = snapshot.progress.coerceIn(0f, 1f),
                         status = snapshot.safeStatus(),
                         lastRead = snapshot.lastRead,
-                        isFavorite = snapshot.isFavorite
+                        isFavorite = snapshot.isFavorite,
+                        positionLabel = snapshot.positionLabel,
                     )
                 }
             }
@@ -151,8 +179,39 @@ class StatsBackupManager @Inject constructor(
             sessionsImported = toInsert.size,
             sessionsSkipped = skipped,
             booksMatched = matchedKeys.size,
-            booksUnmatched = backupBooksByKey.size - matchedKeys.size
+            booksUnmatched = backupBooksByKey.size - matchedKeys.size,
+            highlightsImported = importHighlights(backup.highlights, localIdByKey),
         )
+    }
+
+    /**
+     * Adds the highlights of books in this library that it does not have yet: the same
+     * book, chapter and span is the same highlight. A highlight here is never changed or
+     * removed by an import; the device it was made on is where it is edited.
+     */
+    private suspend fun importHighlights(incoming: List<HighlightSnapshot>, localIdByKey: Map<String, Long>): Int {
+        if (incoming.isEmpty()) return 0
+        val existing = highlightDao.getAllOnce().mapTo(HashSet()) { Triple(it.bookId, it.chapterIndex, it.startOffset to it.endOffset) }
+        var added = 0
+        incoming.forEach { h ->
+            val bookId = localIdByKey[bookMatchKey(h.bookTitle, h.bookAuthor)] ?: return@forEach
+            if (existing.add(Triple(bookId, h.chapterIndex, h.startOffset to h.endOffset))) {
+                highlightDao.insert(
+                    HighlightEntity(
+                        bookId = bookId,
+                        chapterIndex = h.chapterIndex,
+                        startOffset = h.startOffset,
+                        endOffset = h.endOffset,
+                        text = h.text,
+                        note = h.note,
+                        color = (HighlightColor.entries.firstOrNull { it.name == h.color } ?: HighlightColor.YELLOW).ordinal,
+                        createdAt = h.createdAt.takeIf { it > 0 } ?: Date().time,
+                    )
+                )
+                added++
+            }
+        }
+        return added
     }
 
     private fun BookEntity.toSnapshot() = BookStatsSnapshot(
@@ -167,7 +226,8 @@ class StatsBackupManager @Inject constructor(
         isFavorite = isFavorite,
         dateAdded = dateAdded,
         lastRead = lastRead,
-        totalReadingSeconds = totalReadingSeconds
+        totalReadingSeconds = totalReadingSeconds,
+        positionLabel = positionLabel,
     )
 
     /** A session is the same session if it is the same book, instant and length. */
@@ -182,14 +242,19 @@ class StatsBackupManager @Inject constructor(
      * two exports of the same history.
      */
     private fun List<ReadingSessionEntity>.withoutOverlaps(
-        existing: List<ReadingSessionEntity>
+        existing: List<ReadingSessionEntity>,
+        localIds: Set<Long>,
     ): List<ReadingSessionEntity> {
-        val spansByBook = existing.groupByTo(mutableMapOf(), { it.bookId }) {
+        // A book in the library is known by its id. A book that is not (removed, or never
+        // on this device) by its title: its sittings arrive under ids made up on import,
+        // and the same sitting can come back under another one, with or without an author.
+        fun bookOf(s: ReadingSessionEntity): Any = if (s.bookId in localIds) s.bookId else s.bookTitle.trim().lowercase()
+        val spansByBook = existing.groupByTo(mutableMapOf(), ::bookOf) {
             it.startedAt to it.timestamp
         }
         val kept = mutableListOf<ReadingSessionEntity>()
         for (session in sortedBy { it.startedAt }) {
-            val spans = spansByBook.getOrPut(session.bookId) { mutableListOf() }
+            val spans = spansByBook.getOrPut(bookOf(session)) { mutableListOf() }
             val overlaps = spans.any { (start, end) ->
                 session.startedAt <= end && start <= session.timestamp
             }

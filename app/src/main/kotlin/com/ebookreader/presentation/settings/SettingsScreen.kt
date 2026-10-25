@@ -1,5 +1,8 @@
 package com.ebookreader.presentation.settings
 
+import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -12,6 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ebookreader.BuildConfig
 import com.ebookreader.domain.model.*
 import com.ebookreader.presentation.common.Bindery
@@ -138,6 +143,12 @@ fun SettingsScreen(
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
+            // ── Sync ──────────────────────────────────────────────────────
+            SettingsSectionHeader("Sync", Icons.Default.Sync)
+            SyncSettings(settings)
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
             // ── About ─────────────────────────────────────────────────────
             SettingsSectionHeader("About", Icons.Default.Info)
             SettingsInfoItem(
@@ -145,9 +156,68 @@ fun SettingsScreen(
                 "Version ${BuildConfig.VERSION_NAME}",
                 Icons.Default.AutoStories
             )
-            SettingsInfoItem("Supported Formats", "PDF, EPUB", Icons.Default.Description)
+            SettingsInfoItem(
+                "Supported formats",
+                "EPUB, PDF, comics (CBZ, CBR), Kindle (MOBI, AZW3), FB2, plain text and Markdown",
+                Icons.Default.Description
+            )
 
             Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+/**
+ * Sync through a folder the reader's devices already share. Without one, an explanation
+ * and a button to pick it; with one, its name, when it last synced, and the actions.
+ */
+@Composable
+private fun SyncSettings(settings: AppSettings, viewModel: SyncViewModel = hiltViewModel()) {
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let(viewModel::chooseFolder)
+    }
+    val folder = settings.syncFolder
+    if (folder == null) {
+        SettingsItem(
+            "Sync through a folder",
+            "Reading history, places and highlights, kept in step through a folder your devices " +
+                "already share: Syncthing, or a cloud drive's folder. No account needed.",
+            Icons.Default.FolderShared
+        ) {
+            OutlinedButton(onClick = { picker.launch(null) }) { Text("Choose folder") }
+        }
+        return
+    }
+    val name = remember(folder) { viewModel.folderName(folder) }
+    val lastSyncAt by viewModel.lastSyncAt.collectAsStateWithLifecycle()
+    val last = lastSyncAt?.let {
+        val now = System.currentTimeMillis()
+        if (now - it < DateUtils.MINUTE_IN_MILLIS) "Synced just now"
+        else "Last synced " + DateUtils.getRelativeTimeSpanString(it, now, DateUtils.MINUTE_IN_MILLIS)
+            .toString().replaceFirstChar { c -> c.lowercase() }
+    } ?: "Not synced yet"
+    SettingsItem(
+        "Syncing through \u201C$name\u201D",
+        listOfNotNull(viewModel.outcome, last).joinToString(" \u00B7 "),
+        Icons.Default.FolderShared
+    ) {
+        Text(
+            "Syncs when you open and leave the app. Books are matched by title and author; " +
+                "the files themselves stay on each device.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = viewModel::syncNow, enabled = !viewModel.isSyncing) {
+                if (viewModel.isSyncing) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text("Sync now")
+            }
+            TextButton(onClick = { picker.launch(null) }) { Text("Change") }
+            TextButton(onClick = viewModel::stopSyncing) { Text("Stop") }
         }
     }
 }

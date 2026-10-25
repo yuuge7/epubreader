@@ -1,6 +1,7 @@
 package com.ebookreader.data.backup
 
 import com.ebookreader.domain.model.BookStatsSnapshot
+import com.ebookreader.domain.model.HighlightSnapshot
 import com.ebookreader.domain.model.StatsBackup
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -18,6 +19,23 @@ class StatsBackupCodecTest {
         val backup = StatsBackup(exportedAt = 5L, appVersion = "1.6", books = listOf(book(0.37f)), sessions = emptyList())
         val decoded = StatsBackupCodec.decode(StatsBackupCodec.encode(backup))
         assertEquals(0.37f, decoded.books.single().progress, 1e-6f)
+    }
+
+    @Test
+    fun `highlights and the place in words survive a round trip`() {
+        val highlight = HighlightSnapshot(
+            bookTitle = "T", bookAuthor = "A", chapterIndex = 3, startOffset = 10, endOffset = 42,
+            text = "a \"quoted\" line", note = "mine", color = "GREEN", createdAt = 7L,
+        )
+        val backup = StatsBackup(
+            exportedAt = 5L, appVersion = "1.6",
+            books = listOf(book(0.5f).copy(positionLabel = "Chapter 4")),
+            sessions = emptyList(),
+            highlights = listOf(highlight),
+        )
+        val decoded = StatsBackupCodec.decode(StatsBackupCodec.encode(backup))
+        assertEquals(listOf(highlight), decoded.highlights)
+        assertEquals("Chapter 4", decoded.books.single().positionLabel)
     }
 
     @Test

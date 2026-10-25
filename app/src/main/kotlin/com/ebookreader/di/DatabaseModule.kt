@@ -6,6 +6,9 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.ebookreader.data.local.AppDatabase
 import com.ebookreader.data.local.dao.BookDao
+import com.ebookreader.data.local.dao.BookTextDao
+import com.ebookreader.data.local.dao.CollectionDao
+import com.ebookreader.data.local.dao.HighlightDao
 import com.ebookreader.data.local.dao.BookmarkDao
 import com.ebookreader.data.local.dao.ReadingSessionDao
 import com.ebookreader.domain.model.SittingSpan
@@ -108,6 +111,59 @@ object DatabaseModule {
         }
     }
 
+    /**
+     * v6 -> v7: the library and reading features of phases 4-6.
+     *  - books: the text measurements behind "time left" (textLength, chapterWeights),
+     *    the place in words (positionLabel), series, the original format of converted
+     *    books, and whether the text is in the search index.
+     *  - highlights, collections and book_collections: new, start empty.
+     *  - book_text: the full-text index, filled in the background after the upgrade.
+     */
+    private val MIGRATION_6_7 = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            listOf(
+                "`textLength` INTEGER NOT NULL DEFAULT 0",
+                "`chapterWeights` TEXT",
+                "`positionLabel` TEXT",
+                "`series` TEXT",
+                "`seriesIndex` REAL",
+                "`sourceFormat` TEXT",
+                "`textIndexed` INTEGER NOT NULL DEFAULT 0",
+            ).forEach { db.execSQL("ALTER TABLE `books` ADD COLUMN $it") }
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `highlights` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`bookId` INTEGER NOT NULL, `chapterIndex` INTEGER NOT NULL, `startOffset` INTEGER NOT NULL, " +
+                    "`endOffset` INTEGER NOT NULL, `text` TEXT NOT NULL, `note` TEXT NOT NULL DEFAULT '', " +
+                    "`color` INTEGER NOT NULL DEFAULT 0, `createdAt` INTEGER NOT NULL, " +
+                    "FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_highlights_bookId` ON `highlights` (`bookId`)")
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `collections` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`name` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)"
+            )
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_collections_name` ON `collections` (`name`)")
+
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `book_collections` (`bookId` INTEGER NOT NULL, " +
+                    "`collectionId` INTEGER NOT NULL, PRIMARY KEY(`bookId`, `collectionId`), " +
+                    "FOREIGN KEY(`bookId`) REFERENCES `books`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                    "FOREIGN KEY(`collectionId`) REFERENCES `collections`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_book_collections_collectionId` ON `book_collections` (`collectionId`)"
+            )
+
+            db.execSQL(
+                "CREATE VIRTUAL TABLE IF NOT EXISTS `book_text` USING FTS4(`bookId` INTEGER NOT NULL, " +
+                    "`chapterIndex` INTEGER NOT NULL, `content` TEXT NOT NULL, tokenize=unicode61, " +
+                    "notindexed=`bookId`, notindexed=`chapterIndex`)"
+            )
+        }
+    }
+
     /** Reads the fragments, asks [planSittingMerge] what to do, applies it. */
     private fun mergeFragmentedSittings(db: SupportSQLiteDatabase) {
         val rows = mutableListOf<SittingSpan>()
@@ -152,7 +208,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "ebook_reader_db"
         )
-            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
             // Only the pre-release schemas (1, 2) may be thrown away. Everything from v3 on
             // must migrate: a destructive fallback here deletes the user's whole library,
             // reading progress, bookmarks and stats on an app update.
@@ -167,4 +223,13 @@ object DatabaseModule {
 
     @Provides
     fun provideReadingSessionDao(db: AppDatabase): ReadingSessionDao = db.readingSessionDao()
+
+    @Provides
+    fun provideHighlightDao(db: AppDatabase): HighlightDao = db.highlightDao()
+
+    @Provides
+    fun provideCollectionDao(db: AppDatabase): CollectionDao = db.collectionDao()
+
+    @Provides
+    fun provideBookTextDao(db: AppDatabase): BookTextDao = db.bookTextDao()
 }

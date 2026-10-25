@@ -1,6 +1,6 @@
 # EBook Reader
 
-An offline-first Android reader for EPUB and PDF books, with a library manager, bookmarks and reading statistics. Built entirely with Jetpack Compose.
+An offline-first Android reader for EPUB, PDF, comics, Kindle, FB2 and text books, with a library manager, highlights, read-aloud and reading statistics. Built entirely with Jetpack Compose.
 
 <p align="left">
   <img alt="Platform" src="https://img.shields.io/badge/platform-Android%208.0%2B-3DDC84?logo=android&logoColor=white">
@@ -32,12 +32,31 @@ An offline-first Android reader for EPUB and PDF books, with a library manager, 
 - Table of contents, internal link navigation and chapter scrubbing for EPUB
 - Pinch-to-zoom and page scrubbing for PDF
 - Bookmarks with optional notes
+- Select text to copy, share, highlight in four colours, add a note, make a quote card (a
+  shareable image of the passage) or find it elsewhere in the book
+- Find in book, accent- and case-insensitive, landing on the exact occurrence
+- **Read aloud** with the device's voices: the sentence being spoken is marked and kept in
+  view, it carries on into the next chapter and with the screen off, and a media
+  notification (lock screen, headset buttons) controls it. Speed from 0.75× to 2×
+- Comics (CBZ, CBR) a page at a time: swipe or tap the outer thirds, pinch or double-tap to
+  zoom into a panel, right-to-left for manga
 
 **Library**
 - Import from any file picker, or open a book directly from another app
-- Metadata, author and cover art read from the EPUB itself
+- Formats: EPUB and PDF as they are; CBZ and CBR comics; MOBI and AZW3 (Kindle books without
+  DRM), FB2, plain text and Markdown, converted to EPUB on import with their chapters,
+  metadata and covers. DRM-protected Kindle books are refused with a reason
+- **Online catalogues** (OPDS): Project Gutenberg built in, any other catalogue by its
+  address. Browse, search, and download straight into the library. This is the only part
+  of the app that goes online
+- A continue-reading card with the time left in the chapter and the book, at your own pace
+- Covers from the book, page one of a PDF, the first page of a comic, or a generated cloth
+  cover with the title set on it
+- Series and collections, multi-select (favourite, finish, collect, delete), and full-text
+  search inside every book's text
 - Grid and list layouts, search, sort by title/author/date/last read
 - Filter by format, favourites or reading status
+- A home-screen widget with the book you are reading, where you left it, and your streak
 
 **Design**
 - App theme: Auto, Light, Dark or Black (true black for OLED). No wallpaper-derived colour:
@@ -48,12 +67,21 @@ An offline-first Android reader for EPUB and PDF books, with a library manager, 
 
 **Statistics**
 - Per-session and per-book reading time, counted only while the app is in the foreground
+- A year of reading days drawn as page edges, streaks, the last seven days and twelve months
+- Daily-minutes and books-a-year goals, with an optional evening reminder
+- Per-book stats: sittings, pace, time left and a projected finish date
+- A year-in-reading card to share
 - Monthly and yearly summaries with drill-down history
 - Most-read leaderboards; history is retained even after a book is removed
 - Export and import the whole history as a JSON file (Stats screen ⋮ menu), so it survives
   a reinstall or moves to a new device. Books are matched by title + author, since row ids
   mean nothing outside the device that made them; import either merges (skipping sessions
   the device already has) or replaces the local history outright.
+
+**Sync**
+- Keep reading history, places and highlights in step between devices through a folder they
+  already share (Syncthing, or a cloud drive's folder), chosen in Settings. No account and
+  no server: the app reads and writes one JSON file there when you open and leave it
 
 ## Requirements
 
@@ -97,7 +125,14 @@ an Android SDK that has platform 37 installed.
 ```
 app/src/main/kotlin/com/ebookreader/
 ├── data/
-│   ├── epub/          EPUB container, OPF and NCX parsing; chapter extraction
+│   ├── epub/          EPUB container, OPF and NCX parsing; chapter extraction; visible text
+│   ├── convert/       TXT, Markdown, FB2, MOBI/AZW3 to EPUB; CBR to CBZ
+│   ├── library/       Import, covers, format dispatch
+│   ├── opds/          OPDS catalogue parsing and downloads
+│   ├── readaloud/     Text-to-speech controller and its media service
+│   ├── reminders/     The reading-goal reminder
+│   ├── sync/          Folder sync
+│   ├── backup/        Stats backup file
 │   ├── local/         Room database, entities and DAOs
 │   └── repository/    Repository implementations
 ├── domain/
@@ -107,6 +142,9 @@ app/src/main/kotlin/com/ebookreader/
 │   ├── library/       Library, import, book options
 │   ├── reader/epub/   WebView-based EPUB reader: pages, page script, reader stylesheet, Aa sheet
 │   ├── reader/pdf/    PdfRendererView-based PDF reader
+│   ├── reader/comic/  Comic reader
+│   ├── catalog/       Online catalogues
+│   ├── widget/        Home-screen widget
 │   ├── settings/      Settings
 │   ├── stats/         Statistics and history
 │   └── common/        Design tokens (Bindery*), fore-edge, theme and shared helpers
@@ -122,9 +160,12 @@ Architecture is MVVM over a repository layer: Compose screens observe a `StateFl
 | UI | Jetpack Compose, Material 3 |
 | Navigation | Navigation Compose |
 | Dependency injection | Hilt |
-| Persistence | Room (books, bookmarks, sessions), DataStore (settings) |
+| Persistence | Room (books, bookmarks, sessions, highlights, collections, full-text index), DataStore (settings) |
 | Images | Coil |
 | PDF rendering | [Pdf-Viewer](https://github.com/afreakyelf/Pdf-Viewer) |
+| CBR comics | [junrar](https://github.com/junrar/junrar) |
+| Read aloud | Platform `TextToSpeech`, `MediaSession` |
+| Sync folder | AndroidX DocumentFile over the Storage Access Framework |
 | EPUB rendering | WebView with a custom parser; book and fonts served through AndroidX WebKit's `WebViewAssetLoader` |
 | Dependencies | Gradle version catalog (`gradle/libs.versions.toml`) |
 

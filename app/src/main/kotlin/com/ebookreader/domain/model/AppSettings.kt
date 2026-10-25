@@ -71,12 +71,40 @@ data class ReaderLight(
     }
 }
 
+/** Targets the reader sets themselves; 0 means no target. */
+data class ReadingGoals(
+    val minutesPerDay: Int = 0,
+    val booksPerYear: Int = 0,
+    /** A nudge in the evening when today's minutes are not in yet. */
+    val reminder: Boolean = false,
+    /** When the nudge comes, in minutes after midnight. */
+    val reminderAt: Int = 21 * 60,
+) {
+    fun sanitized() = copy(
+        minutesPerDay = minutesPerDay.coerceIn(0, 24 * 60),
+        booksPerYear = booksPerYear.coerceIn(0, 1000),
+        reminderAt = reminderAt.coerceIn(0, 24 * 60 - 1),
+    )
+}
+
+/** An online book catalogue in the OPDS format, by the address of its first page. */
+data class OpdsCatalog(val title: String, val url: String)
+
 data class AppSettings(
     val theme: AppTheme = AppTheme.SYSTEM,
     val readingTheme: ReadingTheme = ReadingTheme.AUTO,
     val typography: ReaderTypography = ReaderTypography(),
     val readerLight: ReaderLight = ReaderLight(),
+    val goals: ReadingGoals = ReadingGoals(),
+    /** Speech rate for reading aloud, 1 = the engine's normal pace. */
+    val readAloudRate: Float = 1f,
+    /** A folder the reader chose (content:// tree URI) that their devices sync, or null. */
+    val syncFolder: String? = null,
     val keepScreenOn: Boolean = false,
+    /** Comics turn right to left, as manga is read. */
+    val comicRightToLeft: Boolean = false,
+    /** OPDS catalogues the reader added, after the built-in ones. */
+    val catalogs: List<OpdsCatalog> = emptyList(),
     val sortOption: SortOption = SortOption.DATE_ADDED,
     val filterOption: FilterOption = FilterOption.ALL,
     val isGridView: Boolean = true,

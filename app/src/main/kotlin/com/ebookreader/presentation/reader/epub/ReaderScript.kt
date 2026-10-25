@@ -157,9 +157,252 @@ internal val ReaderScript = """
     window.scrollTo({ top: to, behavior: R.smooth ? 'smooth' : 'auto' });
   };
 
+  // ── Text ranges ──────────────────────────────────────────────────────────
+  // Highlights, search hits and read-aloud all address the chapter by character offsets
+  // into its text nodes taken in document order (scripts and styles left out). Marks
+  // split text nodes but never change the text, so offsets stay valid while marks come
+  // and go.
+
+  function textNodes() {
+    var list = [], total = 0;
+    if (!document.body) return { list: list, length: 0 };
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        for (var p = node.parentNode; p; p = p.parentNode) {
+          if (p.nodeName === 'SCRIPT' || p.nodeName === 'STYLE') return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    while (walker.nextNode()) {
+      var n = walker.currentNode;
+      list.push({ node: n, start: total });
+      total += n.nodeValue.length;
+    }
+    return { list: list, length: total };
+  }
+
+  function chapterText(nodes) {
+    var parts = [];
+    for (var i = 0; i < nodes.list.length; i++) parts.push(nodes.list[i].node.nodeValue);
+    return parts.join('');
+  }
+
+  // Wraps [start, end) in elements made by make(), one per text node it crosses.
+  function wrap(start, end, make) {
+    var nodes = textNodes(), first = null;
+    for (var i = 0; i < nodes.list.length; i++) {
+      var item = nodes.list[i], node = item.node, len = node.nodeValue.length;
+      var from = Math.max(start, item.start), to = Math.min(end, item.start + len);
+      if (from >= to) continue;
+      var piece = node;
+      if (from > item.start) piece = piece.splitText(from - item.start);
+      if (to < item.start + len) piece.splitText(to - from);
+      var el = make();
+      piece.parentNode.insertBefore(el, piece);
+      el.appendChild(piece);
+      if (!first) first = el;
+    }
+    return first;
+  }
+
+  function unwrap(selector) {
+    var marks = document.querySelectorAll(selector);
+    var parents = [];
+    for (var i = 0; i < marks.length; i++) {
+      var m = marks[i], parent = m.parentNode;
+      while (m.firstChild) parent.insertBefore(m.firstChild, m);
+      parent.removeChild(m);
+      parents.push(parent);
+    }
+    for (var j = 0; j < parents.length; j++) parents[j].normalize();
+  }
+
+  function mark(className, attrs) {
+    return function () {
+      var el = document.createElement('mark');
+      el.className = className;
+      for (var k in attrs) el.setAttribute(k, attrs[k]);
+      return el;
+    };
+  }
+
+  function bringIntoView(el) {
+    if (!el) return;
+    var r = el.getBoundingClientRect();
+    if (r.top < 0 || r.bottom > window.innerHeight) {
+      window.scrollBy(0, r.top - window.innerHeight / 3);
+    }
+  }
+
+  // Lower-case, accents off, keeping a map back to the original offsets: "Élève" is
+  // found by "eleve", the way the library's search index matched it.
+  function fold(text) {
+    var out = [], map = [];
+    for (var i = 0; i < text.length; i++) {
+      var f = text[i].normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      for (var k = 0; k < f.length; k++) { out.push(f[k]); map.push(i); }
+    }
+    return { text: out.join(''), map: map };
+  }
+
+  // The chapter's text as the app's own search counts it: whitespace collapsed (see
+  // speechIndex) and folded, each character mapped back to the page's text. Matches are
+  // counted the same way too, without overlaps, so "the 3rd match" is the same match.
+  var findIndex = null, ttsIndex = null;
+  function searchIndex() {
+    if (findIndex) return findIndex;
+    var flat = speechIndex(), f = fold(flat.flat);
+    return (findIndex = { text: f.text, map: f.map.map(function (i) { return flat.map[i]; }) });
+  }
+
+  // The occurrence-th match of query, marked and scrolled to. Falls back to the first
+  // match, then to the first word, since the index matches words rather than phrases.
+  R.findText = function (query, occurrence) {
+    unwrap('mark.__rs');
+    var folded = searchIndex();
+    function find(q, n) {
+      var idx = -1, from = 0;
+      for (var k = 0; k <= n; k++) {
+        idx = folded.text.indexOf(q, from);
+        if (idx < 0) return -1;
+        from = idx + q.length;
+      }
+      return idx;
+    }
+    var q = fold(query.trim()).text.replace(/\s+/g, ' ');
+    var at = find(q, occurrence || 0);
+    if (at < 0) at = find(q, 0);
+    if (at < 0) { q = q.split(' ')[0]; at = q ? find(q, 0) : -1; }
+    if (at < 0) return false;
+    var start = folded.map[at], end = folded.map[at + q.length - 1] + 1;
+    var el = wrap(start, end, mark('__rs', {}));
+    bringIntoView(el);
+    // The marker is a pointer, not a highlight: it goes once the reader moves on.
+    setTimeout(function () { unwrap('mark.__rs'); }, 6000);
+    return true;
+  };
+
+  // Highlights: [{id, start, end, color}], repainted whole whenever they change.
+  R.paintHighlights = function (list) {
+    unwrap('mark.__hl');
+    for (var i = 0; i < list.length; i++) {
+      var h = list[i];
+      wrap(h.start, h.end, mark('__hl __hl' + h.color, { 'data-hl': h.id }));
+    }
+  };
+
+  R.goToOffset = function (offset) {
+    var nodes = textNodes();
+    for (var i = nodes.list.length - 1; i >= 0; i--) {
+      if (nodes.list[i].start <= offset) {
+        var range = document.createRange();
+        var node = nodes.list[i].node;
+        range.setStart(node, Math.min(offset - nodes.list[i].start, node.nodeValue.length));
+        var rect = range.getBoundingClientRect();
+        if (!rect || (rect.top === 0 && rect.height === 0)) rect = node.parentNode.getBoundingClientRect();
+        window.scrollBy(0, rect.top - window.innerHeight / 4);
+        return;
+      }
+    }
+  };
+
+  function offsetOf(container, offset, nodes) {
+    if (container.nodeType === 3) {
+      for (var i = 0; i < nodes.list.length; i++) {
+        if (nodes.list[i].node === container) return nodes.list[i].start + offset;
+      }
+      return -1;
+    }
+    // An element boundary: the offset of the first text at or after it.
+    var target = container.childNodes[offset] || null;
+    for (var j = 0; j < nodes.list.length; j++) {
+      var n = nodes.list[j].node;
+      if (target ? (target === n || target.contains(n) || (target.compareDocumentPosition(n) & 4))
+                 : container.contains(n) === false && (container.compareDocumentPosition(n) & 4)) {
+        return nodes.list[j].start;
+      }
+    }
+    return nodes.length;
+  }
+
+  // The current selection as offsets and text, or null; then the selection is cleared.
+  R.selection = function () {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+    var range = sel.getRangeAt(0), nodes = textNodes();
+    var start = offsetOf(range.startContainer, range.startOffset, nodes);
+    var end = offsetOf(range.endContainer, range.endOffset, nodes);
+    if (start < 0 || end <= start) return null;
+    var text = chapterText(nodes).substring(start, end);
+    return { start: start, end: end, text: text };
+  };
+
+  R.clearSelection = function () {
+    var sel = window.getSelection();
+    if (sel) sel.removeAllRanges();
+  };
+
+  // ── Read aloud ───────────────────────────────────────────────────────────
+
+  // Where the reader's eye is: the offset of the first text on screen.
+  R.firstVisibleOffset = function () {
+    var nodes = textNodes();
+    for (var i = 0; i < nodes.list.length; i++) {
+      var n = nodes.list[i].node;
+      if (!n.nodeValue.trim()) continue;
+      var range = document.createRange();
+      range.selectNodeContents(n);
+      var rects = range.getClientRects();
+      for (var k = 0; k < rects.length; k++) {
+        if (rects[k].bottom > 4) return nodes.list[i].start;
+      }
+    }
+    return 0;
+  };
+
+  // The text from the top of the page on, for read-aloud to find its starting sentence.
+  R.firstVisibleText = function () {
+    return chapterText(textNodes()).substr(R.firstVisibleOffset(), 200);
+  };
+
+  // Marks the sentence being read aloud. Read-aloud splits the chapter's text itself,
+  // with whitespace collapsed, so the sentence is found by its words: in the page's text
+  // with whitespace collapsed the same way, after the sentence marked before it.
+  var ttsFrom = 0;
+  // The chapter's text with whitespace collapsed, and where each character of it is in the
+  // page's text. Built once: marks split text nodes but never change the text.
+  function speechIndex() {
+    if (ttsIndex) return ttsIndex;
+    var raw = chapterText(textNodes()), hay = [], map = [], gap = false;
+    for (var i = 0; i < raw.length; i++) {
+      var c = raw[i];
+      if (c === '\u00ad') continue;
+      if (/\s/.test(c)) { gap = hay.length > 0; continue; }
+      if (gap) { hay.push(' '); map.push(i); gap = false; }
+      hay.push(c); map.push(i);
+    }
+    return (ttsIndex = { flat: hay.join(''), map: map });
+  }
+  R.speakFind = function (text) {
+    unwrap('mark.__tts');
+    var needle = text.replace(/\s+/g, ' ').trim();
+    if (!needle) return;
+    var index = speechIndex();
+    var at = index.flat.indexOf(needle, ttsFrom);
+    if (at < 0) at = index.flat.indexOf(needle);
+    if (at < 0) return;
+    ttsFrom = at + needle.length;
+    bringIntoView(wrap(index.map[at], index.map[at + needle.length - 1] + 1, mark('__tts', {})));
+  };
+
+  R.speakClear = function () { unwrap('mark.__tts'); ttsFrom = 0; };
+
   document.addEventListener('click', function (e) {
     if (e.defaultPrevented || selecting()) return;
     var t = e.target;
+    var hl = t && t.closest && t.closest('mark.__hl');
+    if (hl) { Android.highlightTapped(parseInt(hl.getAttribute('data-hl'), 10)); return; }
     if (t && t.closest && t.closest('a[href], button, input, select, textarea, summary, label, audio, video')) return;
     var x = e.clientX / window.innerWidth;
     var zone = x < 1 / 3 ? -1 : (x > 2 / 3 ? 1 : 0);

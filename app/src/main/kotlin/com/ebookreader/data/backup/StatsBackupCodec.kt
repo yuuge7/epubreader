@@ -1,6 +1,7 @@
 package com.ebookreader.data.backup
 
 import com.ebookreader.domain.model.BookStatsSnapshot
+import com.ebookreader.domain.model.HighlightSnapshot
 import com.ebookreader.domain.model.SessionSnapshot
 import com.ebookreader.domain.model.StatsBackup
 import com.ebookreader.domain.model.pageProgress
@@ -18,6 +19,8 @@ object StatsBackupCodec {
     /**
      * 1: sessions carried only an end timestamp.
      * 2: sessions carry `startedAt` as well, since a sitting now has a real span.
+     *    Later 2 files may also carry `highlights`; readers that predate them skip the
+     *    key, so it needed no new version.
      */
     const val VERSION = 2
     const val MIME_TYPE = "application/json"
@@ -49,6 +52,7 @@ object StatsBackupCodec {
                     // an absent lastRead means "never opened".
                     put("lastRead", book.lastRead)
                     put("totalReadingSeconds", book.totalReadingSeconds)
+                    put("positionLabel", book.positionLabel)
                 }
             )
         }
@@ -67,6 +71,26 @@ object StatsBackupCodec {
             )
         }
         root.put("sessions", sessions)
+
+        if (backup.highlights.isNotEmpty()) {
+            val highlights = JSONArray()
+            backup.highlights.forEach { h ->
+                highlights.put(
+                    JSONObject().apply {
+                        put("bookTitle", h.bookTitle)
+                        put("bookAuthor", h.bookAuthor)
+                        put("chapterIndex", h.chapterIndex)
+                        put("startOffset", h.startOffset)
+                        put("endOffset", h.endOffset)
+                        put("text", h.text)
+                        put("note", h.note)
+                        put("color", h.color)
+                        put("createdAt", h.createdAt)
+                    }
+                )
+            }
+            root.put("highlights", highlights)
+        }
 
         return root.toString(2)
     }
@@ -113,7 +137,8 @@ object StatsBackupCodec {
                 isFavorite = obj.optBoolean("isFavorite", false),
                 dateAdded = obj.optLong("dateAdded", 0L),
                 lastRead = if (obj.isNull("lastRead")) null else obj.optLong("lastRead"),
-                totalReadingSeconds = obj.optLong("totalReadingSeconds", 0L)
+                totalReadingSeconds = obj.optLong("totalReadingSeconds", 0L),
+                positionLabel = if (obj.isNull("positionLabel")) null else obj.optString("positionLabel").ifBlank { null },
             )
         }.filter { it.title.isNotBlank() }
 
@@ -132,6 +157,20 @@ object StatsBackupCodec {
             )
         }.filter { it.durationSeconds > 0 && it.timestamp > 0 }
 
+        val highlights = root.optJSONArray("highlights").mapObjects { obj ->
+            HighlightSnapshot(
+                bookTitle = obj.optString("bookTitle"),
+                bookAuthor = obj.optString("bookAuthor"),
+                chapterIndex = obj.optInt("chapterIndex", -1),
+                startOffset = obj.optInt("startOffset", -1),
+                endOffset = obj.optInt("endOffset", -1),
+                text = obj.optString("text"),
+                note = obj.optString("note"),
+                color = obj.optString("color", "YELLOW"),
+                createdAt = obj.optLong("createdAt", 0L),
+            )
+        }.filter { it.bookTitle.isNotBlank() && it.chapterIndex >= 0 && it.endOffset > it.startOffset && it.startOffset >= 0 }
+
         if (books.isEmpty() && sessions.isEmpty()) {
             throw InvalidBackupException("Backup contains no readable stats.")
         }
@@ -140,7 +179,8 @@ object StatsBackupCodec {
             exportedAt = root.optLong("exportedAt", 0L),
             appVersion = root.optString("appVersion"),
             books = books,
-            sessions = sessions
+            sessions = sessions,
+            highlights = highlights,
         )
     }
 

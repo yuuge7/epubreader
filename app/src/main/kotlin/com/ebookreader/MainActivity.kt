@@ -16,17 +16,27 @@ import androidx.navigation.compose.rememberNavController
 import com.ebookreader.presentation.AppNavigation
 import com.ebookreader.presentation.MainViewModel
 import com.ebookreader.presentation.common.EBookReaderTheme
+import com.ebookreader.data.sync.FolderSync
+import com.ebookreader.presentation.widget.ContinueReadingWidget
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
+    @Inject lateinit var folderSync: FolderSync
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        handleViewIntent(intent)
+        // Only for a fresh start: after a rotation or a restore the intent is the same one,
+        // already handled, and would import the file or open the widget's book again.
+        if (savedInstanceState == null) {
+            handleViewIntent(intent)
+            handleWidgetIntent(intent)
+        }
 
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -55,7 +65,9 @@ class MainActivity : ComponentActivity() {
                             settings = uiState.settings,
                             onEditSettings = viewModel::editSettings,
                             pendingImportUri = uiState.pendingImportUri,
-                            onPendingImportHandled = viewModel::consumePendingImport
+                            onPendingImportHandled = viewModel::consumePendingImport,
+                            pendingOpenBook = uiState.pendingOpenBook,
+                            onPendingOpenHandled = viewModel::consumePendingOpen,
                         )
                     }
                     // else: show nothing while loading (brief splash)
@@ -64,10 +76,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // With a sync folder chosen, coming back to the app takes in what other devices read,
+    // and leaving it hands over what was read here. Both are no-ops without a folder.
+    override fun onStart() {
+        super.onStart()
+        folderSync.syncInBackground()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) {
+            folderSync.syncInBackground()
+            // What was read just now is what the home-screen widget should show.
+            ContinueReadingWidget.refresh(this)
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleViewIntent(intent)
+        handleWidgetIntent(intent)
+    }
+
+    /** The home-screen widget opens the book it shows. */
+    private fun handleWidgetIntent(intent: Intent?) {
+        val bookId = intent?.getLongExtra(ContinueReadingWidget.EXTRA_BOOK_ID, -1L) ?: return
+        if (bookId > 0) viewModel.openBook(bookId)
     }
 
     /**

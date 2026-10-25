@@ -11,7 +11,22 @@ data class StatsBackup(
     val exportedAt: Long,
     val appVersion: String,
     val books: List<BookStatsSnapshot>,
-    val sessions: List<SessionSnapshot>
+    val sessions: List<SessionSnapshot>,
+    /** Absent from files written before highlights were carried. */
+    val highlights: List<HighlightSnapshot> = emptyList(),
+)
+
+/** A highlight, by its book's title and author and its place in a chapter's text. */
+data class HighlightSnapshot(
+    val bookTitle: String,
+    val bookAuthor: String,
+    val chapterIndex: Int,
+    val startOffset: Int,
+    val endOffset: Int,
+    val text: String,
+    val note: String,
+    val color: String,
+    val createdAt: Long,
 )
 
 data class BookStatsSnapshot(
@@ -27,7 +42,9 @@ data class BookStatsSnapshot(
     val isFavorite: Boolean,
     val dateAdded: Long,
     val lastRead: Long?,
-    val totalReadingSeconds: Long
+    val totalReadingSeconds: Long,
+    /** "Chapter 4", "Page 12 of 40": absent from older files. */
+    val positionLabel: String? = null,
 )
 
 data class SessionSnapshot(
@@ -53,7 +70,8 @@ data class StatsImportResult(
     val sessionsImported: Int,
     val sessionsSkipped: Int,
     val booksMatched: Int,
-    val booksUnmatched: Int
+    val booksUnmatched: Int,
+    val highlightsImported: Int = 0,
 )
 
 /**

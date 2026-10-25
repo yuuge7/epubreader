@@ -33,4 +33,8 @@ interface ReadingSessionDao {
 
     @Query("DELETE FROM reading_sessions")
     suspend fun deleteAllSessions()
+
+    /** Seconds read in sittings that began at or after [since]. */
+    @Query("SELECT COALESCE(SUM(durationSeconds), 0) FROM reading_sessions WHERE startedAt >= :since")
+    suspend fun secondsSince(since: Long): Long
 }

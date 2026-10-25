@@ -5,15 +5,13 @@ import androidx.lifecycle.viewModelScope
 import com.ebookreader.di.ApplicationScope
 import com.ebookreader.domain.model.Book
 import com.ebookreader.domain.model.Bookmark
-import com.ebookreader.domain.model.ReadingSessionTracker
 import com.ebookreader.domain.model.ReadingStatus
 import com.ebookreader.domain.model.pageProgress
 import com.ebookreader.domain.repository.BookRepository
+import com.ebookreader.presentation.reader.ReadingTimeRecorder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -41,16 +39,13 @@ class PdfReaderViewModel @Inject constructor(
     private companion object {
         /** How long to wait for the viewer to reach the saved page before giving up. */
         const val RESTORE_TIMEOUT_MS = 10_000L
-        /** How often reading time is persisted while the screen stays open. */
-        const val PERIODIC_FLUSH_MS = 60_000L
     }
 
     private val _uiState = MutableStateFlow(PdfReaderUiState())
     val uiState: StateFlow<PdfReaderUiState> = _uiState.asStateFlow()
 
-    private val sessionTracker = ReadingSessionTracker()
+    private val readingTime = ReadingTimeRecorder(bookRepository, appScope)
 
-    private var flushJob: Job? = null
     private var bookId: Long = -1L
     private var currentPage: Int = 0
     private var currentTotalPages: Int = 0
@@ -67,6 +62,7 @@ class PdfReaderViewModel @Inject constructor(
     fun loadBook(id: Long) {
         if (bookId == id && _uiState.value.book != null) return
         bookId = id
+        readingTime.bookId = id
         viewModelScope.launch {
             val book = bookRepository.getBookById(id) ?: run {
                 _uiState.update { it.copy(error = "Book not found", isLoading = false) }
@@ -120,7 +116,8 @@ class PdfReaderViewModel @Inject constructor(
         currentPage = page
         viewModelScope.launch {
             bookRepository.updateReadingProgress(
-                bookId, page, totalPages, progress = pageProgress(page, totalPages)
+                bookId, page, totalPages, progress = pageProgress(page, totalPages),
+                positionLabel = pageLabel(page, totalPages),
             )
             checkPageBookmarked(page)
         }
@@ -206,52 +203,23 @@ class PdfReaderViewModel @Inject constructor(
 
     // ── Session time ─────────────────────────────────────────────────────────
 
-    fun onScreenResumed() {
-        sessionTracker.resume()
-        startPeriodicFlush()
-    }
+    fun onScreenResumed() = readingTime.resume(viewModelScope)
 
     fun onScreenPaused() {
-        stopPeriodicFlush()
-        sessionTracker.pause()
-        flushSessionTime()
+        readingTime.pause()
         flushPosition()
     }
 
-    /**
-     * Reading time is written out every minute as well as on every pause. Losing at most
-     * a minute to a crash or a battery pull is the point; the sitting is extended rather
-     * than split, so flushing this often costs nothing in the history.
-     */
-    private fun startPeriodicFlush() {
-        if (flushJob?.isActive == true) return
-        flushJob = viewModelScope.launch {
-            while (isActive) {
-                delay(PERIODIC_FLUSH_MS)
-                flushSessionTime()
-            }
-        }
-    }
-
-    private fun stopPeriodicFlush() {
-        flushJob?.cancel()
-        flushJob = null
-    }
-
-    fun currentSessionSeconds(): Long = sessionTracker.elapsedSeconds()
-
-    private fun flushSessionTime() {
-        val seconds = sessionTracker.takeUnsavedSeconds()
-        if (seconds <= 0L || bookId <= 0L) return
-        appScope.launch { bookRepository.addReadingSeconds(bookId, seconds) }
-    }
+    fun currentSessionSeconds(): Long = readingTime.elapsedSeconds()
 
     private fun flushPosition() {
         if (bookId <= 0L || !positionRestored) return
         val page = currentPage
         val total = currentTotalPages
         appScope.launch {
-            bookRepository.updateReadingProgress(bookId, page, total, progress = pageProgress(page, total))
+            bookRepository.updateReadingProgress(
+                bookId, page, total, progress = pageProgress(page, total), positionLabel = pageLabel(page, total)
+            )
         }
     }
 
@@ -261,3 +229,7 @@ class PdfReaderViewModel @Inject constructor(
         onScreenPaused()
     }
 }
+
+/** "Page 12 of 40", as the library shows where a paged book was left. */
+internal fun pageLabel(page: Int, totalPages: Int): String =
+    if (totalPages > 0) "Page ${page + 1} of $totalPages" else "Page ${page + 1}"

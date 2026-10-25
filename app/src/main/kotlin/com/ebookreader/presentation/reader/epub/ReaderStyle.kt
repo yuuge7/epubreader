@@ -23,6 +23,11 @@ internal data class PageColors(
     val dark: Boolean,
     /** Multiplier for images on a dark page, so a white figure does not glare. 1 = untouched. */
     val imageBrightness: Float,
+    /** Highlight inks, by [com.ebookreader.domain.model.HighlightColor] ordinal. */
+    val highlights: List<String> = emptyList(),
+    /** The pointer left on a search hit, and the sentence being read aloud. */
+    val searchMark: String = "",
+    val speechMark: String = "",
 ) {
     companion object {
         fun of(c: BinderyColors) = PageColors(
@@ -32,6 +37,9 @@ internal data class PageColors(
             rule = c.rule.toCssHex(),
             selection = c.bookcloth.copy(alpha = if (c.isDark) 0.45f else 0.25f).toCssRgba(),
             dark = c.isDark,
+            highlights = HighlightInks.map { it.copy(alpha = if (c.isDark) 0.34f else 0.38f).toCssRgba() },
+            searchMark = c.bookcloth.copy(alpha = if (c.isDark) 0.40f else 0.22f).toCssRgba(),
+            speechMark = c.bookcloth.copy(alpha = if (c.isDark) 0.26f else 0.14f).toCssRgba(),
             imageBrightness = when {
                 !c.isDark -> 1f
                 // True black: the dimmest page, so the figures come down furthest.
@@ -109,6 +117,19 @@ internal fun readerCss(style: PageStyle): String {
         }
         // Only real links: an <a id> is a place in the text, not something to tap.
         append("a[href],a[href]:visited,a[href] *{color:${c.link}!important;}\n")
+        // Marks the reader paints. "body mark" outranks the dark page's rule that clears
+        // every background, so they show on any theme.
+        append("body mark.__hl0,body mark.__hl1,body mark.__hl2,body mark.__hl3,body mark.__rs,body mark.__tts")
+        append("{color:inherit!important;}\n")
+        c.highlights.forEachIndexed { i, ink ->
+            append("body mark.__hl$i{background-color:$ink!important;border-radius:2px;}\n")
+        }
+        if (c.searchMark.isNotEmpty()) {
+            append("body mark.__rs{background-color:${c.searchMark}!important;outline:2px solid ${c.link};border-radius:2px;}\n")
+        }
+        if (c.speechMark.isNotEmpty()) {
+            append("body mark.__tts{background-color:${c.speechMark}!important;}\n")
+        }
         if (c.imageBrightness < 1f) {
             append("img,svg image,video{filter:brightness(${num(c.imageBrightness)});}\n")
         }
@@ -118,6 +139,14 @@ internal fun readerCss(style: PageStyle): String {
 /** The chapter with the reader's stylesheet as the last word in its head. */
 internal fun chapterDocument(html: String, css: String): String =
     insertAtEndOfHead(html, """<style id="$READER_STYLE_ID">$css</style>""")
+
+/** Yellow, green, blue, pink: one alpha laid over any page keeps the text readable. */
+private val HighlightInks = listOf(
+    androidx.compose.ui.graphics.Color(0xFFF2C230),
+    androidx.compose.ui.graphics.Color(0xFF6BBF59),
+    androidx.compose.ui.graphics.Color(0xFF55A3E6),
+    androidx.compose.ui.graphics.Color(0xFFE877A9),
+)
 
 private fun px(value: Float) = num(value) + "px"
 

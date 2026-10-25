@@ -147,6 +147,8 @@ dependencies {
 
     // Serves the open book and the reading fonts to the EPUB WebView from one origin
     implementation(libs.androidx.webkit)
+    implementation(libs.junrar)
+    implementation(libs.androidx.documentfile)
 
     testImplementation(libs.junit)
     testImplementation(libs.kxml2)

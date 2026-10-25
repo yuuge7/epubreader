@@ -482,5 +482,12 @@ R7–R10 (selection, highlights, search, quote cards), T1–T6 (stats with actua
 **Phase 6 — reach**
 R11 (TTS), F1 (formats), F3 (OPDS), T13 (sync), F7 (widget).
 
+Phases 1 to 6 are done. Left from the lists above: F2 (bulk import), F4 (duplicates by
+content hash), F5 (share target), F6/F8 (shortcuts, Quick Settings tile), F9 (dictionary),
+F10, F12 to F14, T10 to T12, and the TOC/NCX parsing issue in Gutenberg EPUBs (the NCX
+`<item>` with `media-type` before `href` is not found, so chapters fall back to "Chapter N").
+OPDS sign-in (Standard Ebooks is patrons-only) and highlight deletions in sync are not
+handled yet.
+
 Tests (A7) and CI (A8) are not a phase; add them alongside whichever phase touches the code they
 would cover, starting with `EpubParser` in Phase 3.

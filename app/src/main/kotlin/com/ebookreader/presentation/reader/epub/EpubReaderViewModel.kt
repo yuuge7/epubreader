@@ -3,22 +3,30 @@ package com.ebookreader.presentation.reader.epub
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ebookreader.data.epub.EpubParser
+import com.ebookreader.data.readaloud.ReadAloudBook
+import com.ebookreader.data.readaloud.ReadAloudController
+import com.ebookreader.data.readaloud.ReadAloudState
 import com.ebookreader.di.ApplicationScope
 import com.ebookreader.domain.model.Bookmark
 import com.ebookreader.domain.model.ChapterWeights
 import com.ebookreader.domain.model.EpubChapter
-import com.ebookreader.domain.model.ReadingSessionTracker
+import com.ebookreader.domain.model.Highlight
+import com.ebookreader.domain.model.HighlightColor
+import com.ebookreader.domain.model.TextFinder
+import com.ebookreader.domain.repository.HighlightRepository
+import com.ebookreader.data.epub.visibleText
 import com.ebookreader.domain.model.ReadingStatus
 import com.ebookreader.domain.repository.BookRepository
+import com.ebookreader.presentation.reader.ReadingTimeRecorder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
 /** Where in a chapter to put the reader. */
@@ -27,6 +35,10 @@ sealed interface PagePosition {
     data class Fraction(val value: Float) : PagePosition
     /** An element id (or name) inside the chapter. */
     data class Anchor(val id: String) : PagePosition
+    /** The [occurrence]th match of [query] in the chapter's text, marked on the page. */
+    data class Search(val query: String, val occurrence: Int = 0) : PagePosition
+    /** A character offset into the chapter's text: where a highlight starts. */
+    data class TextOffset(val offset: Int) : PagePosition
 }
 
 /**
@@ -35,8 +47,38 @@ sealed interface PagePosition {
  */
 data class PositionRequest(val position: PagePosition, val id: Long)
 
+/** A place in this book where searched-for words occur. */
+data class InBookHit(
+    val chapterIndex: Int,
+    val chapterTitle: String,
+    /** Which match in the chapter this is, so the page marks the same one. */
+    val occurrence: Int,
+    val snippet: TextFinder.Snippet,
+)
+
+data class BookSearchState(
+    val query: String = "",
+    val results: List<InBookHit> = emptyList(),
+    val isSearching: Boolean = false,
+    /** True once a search has run, so "no results" is told apart from "not searched". */
+    val searched: Boolean = false,
+)
+
+/** A passage to set as a quote card and share. */
+data class Quote(val text: String, val title: String, val author: String)
+
 data class EpubReaderUiState(
     val bookTitle: String = "",
+    val bookAuthor: String = "",
+    val highlights: List<Highlight> = emptyList(),
+    /** A highlight tapped on the page: its sheet is open. */
+    val openHighlight: Highlight? = null,
+    /** A highlight whose note is being written. */
+    val noteFor: Highlight? = null,
+    val showSearch: Boolean = false,
+    val search: BookSearchState = BookSearchState(),
+    /** Waiting for the screen to render and share. */
+    val quote: Quote? = null,
     val chapters: List<EpubChapter> = emptyList(),
     val currentChapterIndex: Int = 0,
     /** Where the book is unpacked; the pages are served from here. */
@@ -64,7 +106,9 @@ data class EpubReaderUiState(
 @HiltViewModel
 class EpubReaderViewModel @Inject constructor(
     private val bookRepository: BookRepository,
+    private val highlightRepository: HighlightRepository,
     private val epubParser: EpubParser,
+    private val readAloudController: ReadAloudController,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -73,30 +117,48 @@ class EpubReaderViewModel @Inject constructor(
         const val POSITION_SAVE_INTERVAL_MS = 2_000L
         /** Scrolled this far into the final chapter counts as "read to the end". */
         const val END_OF_BOOK_FRACTION = 0.98f
-        /** How often reading time is persisted while the screen stays open. */
-        const val PERIODIC_FLUSH_MS = 60_000L
+        const val MAX_SEARCH_RESULTS = 200
         const val MISSING_CHAPTER = "<html><head></head><body><p>Chapter content unavailable.</p></body></html>"
     }
 
     private val _uiState = MutableStateFlow(EpubReaderUiState())
     val uiState: StateFlow<EpubReaderUiState> = _uiState.asStateFlow()
 
-    private val sessionTracker = ReadingSessionTracker()
+    private val readingTime = ReadingTimeRecorder(bookRepository, appScope)
 
     private var bookId: Long = -1L
     private var chapterContents: Map<String, String> = emptyMap()
     private var chapterPaths: Map<String, String> = emptyMap()
     private var weights = ChapterWeights(emptyList())
 
-    private var flushJob: Job? = null
     private var currentScrollFraction: Float = 0f
     private var lastPositionSaveMs: Long = 0L
     private var isBookLoaded: Boolean = false
     private var nextRequestId = 0L
 
-    fun loadBook(id: Long) {
+    /** Reading aloud, for this book or another; the screen shows it only for this one. */
+    val readAloud: StateFlow<ReadAloudState> = readAloudController.state
+
+    init {
+        // The page follows the voice into the next chapter.
+        viewModelScope.launch {
+            readAloudController.state
+                .filter { it.isActive && it.bookId == bookId && isBookLoaded }
+                .map { it.chapterIndex }
+                .distinctUntilChanged()
+                .collect { chapter -> if (chapter != _uiState.value.currentChapterIndex) goToChapter(chapter) }
+        }
+    }
+
+    /**
+     * @param startChapter open at the top of this chapter instead of the saved place, for
+     *   a search hit; -1 for the saved place.
+     * @param searchQuery the words that hit, to be found on the page.
+     */
+    fun loadBook(id: Long, startChapter: Int = -1, searchQuery: String? = null) {
         if (bookId == id && isBookLoaded) return
         bookId = id
+        readingTime.bookId = id
         viewModelScope.launch {
             val book = bookRepository.getBookById(id) ?: run {
                 _uiState.update { it.copy(error = "Book not found", isLoading = false) }
@@ -109,6 +171,11 @@ class EpubReaderViewModel @Inject constructor(
                 chapterContents = result.chapterContents
                 chapterPaths = result.chapterPaths
                 weights = ChapterWeights(result.chapterWeights)
+                // What "time left" in the library is worked out from.
+                val textLength = result.chapterWeights.sum()
+                if (textLength != book.textLength || result.chapterWeights != book.chapterWeights) {
+                    appScope.launch { bookRepository.updateTextMetrics(id, textLength, result.chapterWeights) }
+                }
 
                 val savedPage = book.currentPage.coerceIn(
                     0, (result.book.chapters.size - 1).coerceAtLeast(0)
@@ -116,6 +183,7 @@ class EpubReaderViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         bookTitle = result.book.title,
+                        bookAuthor = book.author,
                         chapters = result.book.chapters,
                         totalChapters = result.book.chapters.size,
                         currentChapterIndex = savedPage,
@@ -127,9 +195,26 @@ class EpubReaderViewModel @Inject constructor(
                     )
                 }
                 isBookLoaded = true
-                // Resume exactly where the reader left off: chapter *and* offset in it.
-                goToChapter(savedPage, PagePosition.Fraction(book.scrollFraction.coerceIn(0f, 1f)))
+                if (startChapter in result.book.chapters.indices) {
+                    goToChapter(
+                        startChapter,
+                        searchQuery?.let { PagePosition.Search(it) } ?: PagePosition.Fraction(0f)
+                    )
+                } else {
+                    // Resume exactly where the reader left off: chapter *and* offset in it.
+                    goToChapter(savedPage, PagePosition.Fraction(book.scrollFraction.coerceIn(0f, 1f)))
+                }
                 loadBookmarks()
+                launch {
+                    highlightRepository.getHighlights(id).collect { list ->
+                        _uiState.update { s ->
+                            s.copy(
+                                highlights = list,
+                                openHighlight = s.openHighlight?.let { open -> list.firstOrNull { it.id == open.id } },
+                            )
+                        }
+                    }
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = "Failed to open EPUB: ${e.message}", isLoading = false) }
             }
@@ -178,6 +263,128 @@ class EpubReaderViewModel @Inject constructor(
         }
     }
 
+    // ── Highlights and notes ─────────────────────────────────────────────────
+
+    private var lastColor = HighlightColor.YELLOW
+
+    fun onHighlightTapped(id: Long) = _uiState.update { s ->
+        s.copy(openHighlight = s.highlights.firstOrNull { it.id == id })
+    }
+
+    fun closeHighlight() = _uiState.update { it.copy(openHighlight = null) }
+
+    /** What the reader picked from the toolbar over selected text. */
+    fun onSelection(action: SelectionAction, selection: TextSelection) {
+        val text = selection.text.trim()
+        if (text.isEmpty()) return
+        when (action) {
+            SelectionAction.HIGHLIGHT -> addHighlight(selection, openNote = false)
+            SelectionAction.NOTE -> addHighlight(selection, openNote = true)
+            SelectionAction.QUOTE -> shareQuote(text)
+            SelectionAction.SEARCH -> openSearch(text.take(80))
+        }
+    }
+
+    private fun addHighlight(selection: TextSelection, openNote: Boolean) {
+        val chapter = _uiState.value.currentChapterIndex
+        viewModelScope.launch {
+            val highlight = Highlight(
+                bookId = bookId,
+                chapterIndex = chapter,
+                startOffset = selection.start,
+                endOffset = selection.end,
+                text = selection.text.trim(),
+                color = lastColor,
+            )
+            val id = highlightRepository.addHighlight(highlight)
+            if (openNote) _uiState.update { it.copy(noteFor = highlight.copy(id = id)) }
+        }
+    }
+
+    fun setHighlightColor(highlight: Highlight, color: HighlightColor) {
+        lastColor = color
+        viewModelScope.launch { highlightRepository.updateHighlight(highlight.copy(color = color)) }
+    }
+
+    fun editNote(highlight: Highlight) = _uiState.update { it.copy(noteFor = highlight, openHighlight = null) }
+
+    fun saveNote(highlight: Highlight, note: String) {
+        viewModelScope.launch { highlightRepository.updateHighlight(highlight.copy(note = note.trim())) }
+        _uiState.update { it.copy(noteFor = null) }
+    }
+
+    fun dismissNote() = _uiState.update { it.copy(noteFor = null) }
+
+    fun deleteHighlight(highlight: Highlight) {
+        viewModelScope.launch { highlightRepository.deleteHighlight(highlight) }
+        _uiState.update { it.copy(openHighlight = null) }
+    }
+
+    fun goToHighlight(highlight: Highlight) {
+        _uiState.update { it.copy(showBookmarksSheet = false, openHighlight = null) }
+        goToChapter(highlight.chapterIndex, PagePosition.TextOffset(highlight.startOffset))
+    }
+
+    fun shareQuote(text: String) = _uiState.update {
+        it.copy(quote = Quote(text, it.bookTitle, it.bookAuthor), openHighlight = null)
+    }
+
+    fun consumeQuote() = _uiState.update { it.copy(quote = null) }
+
+    // ── Search in the book ───────────────────────────────────────────────────
+
+    /** Each chapter's visible text, made when first searched or read aloud. */
+    private val chapterTexts = ConcurrentHashMap<Int, String>()
+
+    private fun chapterText(index: Int): String = chapterTexts.getOrPut(index) {
+        visibleText(_uiState.value.chapters.getOrNull(index)?.let { chapterContents[it.id] }.orEmpty())
+    }
+    private var searchJob: Job? = null
+
+    fun openSearch(query: String? = null) {
+        _uiState.update { it.copy(showSearch = true, showControls = false) }
+        if (!query.isNullOrBlank()) searchBook(query)
+    }
+
+    fun closeSearch() = _uiState.update { it.copy(showSearch = false) }
+
+    fun searchBook(query: String) {
+        searchJob?.cancel()
+        _uiState.update { it.copy(search = it.search.copy(query = query)) }
+        if (query.trim().length < 2) {
+            _uiState.update { it.copy(search = BookSearchState(query = query)) }
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(200)
+            _uiState.update { it.copy(search = it.search.copy(isSearching = true)) }
+            val chapters = _uiState.value.chapters
+            val results = withContext(Dispatchers.Default) {
+                val seen = HashSet<String>()
+                val hits = ArrayList<InBookHit>()
+                for ((index, chapter) in chapters.withIndex()) {
+                    // A file listed by several contents entries is searched once.
+                    if (!seen.add(chapterPaths[chapter.id] ?: chapter.id)) continue
+                    val text = chapterText(index)
+                    TextFinder.findAll(text, query, limit = MAX_SEARCH_RESULTS - hits.size)
+                        .forEachIndexed { occurrence, range ->
+                            hits += InBookHit(index, chapter.title, occurrence, TextFinder.snippet(text, range))
+                        }
+                    if (hits.size >= MAX_SEARCH_RESULTS) break
+                }
+                hits
+            }
+            _uiState.update {
+                it.copy(search = BookSearchState(query, results, isSearching = false, searched = true))
+            }
+        }
+    }
+
+    fun goToHit(hit: InBookHit) {
+        _uiState.update { it.copy(showSearch = false) }
+        goToChapter(hit.chapterIndex, PagePosition.Search(_uiState.value.search.query, hit.occurrence))
+    }
+
     fun onPositionApplied(requestId: Long) = _uiState.update {
         if (it.positionRequest?.id == requestId) it.copy(positionRequest = null) else it
     }
@@ -215,9 +422,10 @@ class EpubReaderViewModel @Inject constructor(
         val total = _uiState.value.totalChapters
         val fraction = currentScrollFraction
         val progress = weights.progressAt(page, fraction)
+        val label = _uiState.value.chapters.getOrNull(page)?.title
         // appScope: this must still complete when the screen is being torn down.
         appScope.launch {
-            bookRepository.updateReadingProgress(bookId, page, total, fraction, progress)
+            bookRepository.updateReadingProgress(bookId, page, total, fraction, progress, label)
         }
     }
 
@@ -365,50 +573,51 @@ class EpubReaderViewModel @Inject constructor(
 
     // ── Session time ─────────────────────────────────────────────────────────
 
-    fun onScreenResumed() {
-        sessionTracker.resume()
-        startPeriodicFlush()
-    }
+    fun onScreenResumed() = readingTime.resume(viewModelScope)
 
     /** Screen backgrounded or closed: stop the clock and persist what was read. */
     fun onScreenPaused() {
-        stopPeriodicFlush()
-        sessionTracker.pause()
-        flushSessionTime()
+        readingTime.pause()
         savePosition(force = true)
     }
 
-    /**
-     * Reading time is written out every minute as well as on every pause. Losing at most
-     * a minute to a crash or a battery pull is the point; the sitting is extended rather
-     * than split, so flushing this often costs nothing in the history.
-     */
-    private fun startPeriodicFlush() {
-        if (flushJob?.isActive == true) return
-        flushJob = viewModelScope.launch {
-            while (isActive) {
-                delay(PERIODIC_FLUSH_MS)
-                flushSessionTime()
-            }
+    fun currentSessionSeconds(): Long = readingTime.elapsedSeconds()
+
+    // ── Read aloud ───────────────────────────────────────────────────────────
+
+    /** Starts reading this book aloud from the open chapter, at [fromText] if it is found. */
+    fun startReadAloud(fromText: String?, rate: Float) {
+        val state = _uiState.value
+        if (!isBookLoaded || state.chapters.isEmpty()) return
+        // Holds on to this ViewModel only while reading aloud: closing the book stops it.
+        val chapters = state.chapters
+        fun fileOf(index: Int) = chapters.getOrNull(index)?.let { chapterPaths[it.id] ?: it.id }
+        val book = object : ReadAloudBook {
+            override val bookId = this@EpubReaderViewModel.bookId
+            override val title = state.bookTitle
+            override val author = state.bookAuthor
+            override val language = state.language
+            override val chapterCount = chapters.size
+            override fun chapterTitle(index: Int) = chapters.getOrNull(index)?.title.orEmpty()
+            // A file listed by several contents entries is read once, at its first entry.
+            override suspend fun chapterText(index: Int) =
+                if (index > 0 && fileOf(index) == fileOf(index - 1)) ""
+                else withContext(Dispatchers.Default) { this@EpubReaderViewModel.chapterText(index) }
         }
+        readAloudController.start(book, state.currentChapterIndex, fromText, rate)
     }
 
-    private fun stopPeriodicFlush() {
-        flushJob?.cancel()
-        flushJob = null
-    }
-
-    fun currentSessionSeconds(): Long = sessionTracker.elapsedSeconds()
-
-    private fun flushSessionTime() {
-        val seconds = sessionTracker.takeUnsavedSeconds()
-        if (seconds <= 0L || bookId <= 0L) return
-        appScope.launch { bookRepository.addReadingSeconds(bookId, seconds) }
-    }
+    fun toggleReadAloud() = readAloudController.toggle()
+    fun skipSentence(by: Int) = readAloudController.skip(by)
+    fun stopReadAloud() = readAloudController.stop()
+    fun setReadAloudRate(rate: Float) = readAloudController.setRate(rate)
+    fun clearReadAloudError() = readAloudController.clearError()
 
     override fun onCleared() {
         super.onCleared()
         // viewModelScope is already cancelled here, so these run on appScope.
         onScreenPaused()
+        // Closing the book ends reading it aloud.
+        if (readAloudController.state.value.bookId == bookId) readAloudController.stop()
     }
 }

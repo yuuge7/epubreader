@@ -15,5 +15,7 @@ data class EpubBook(
     val coverImagePath: String? = null,
     val description: String? = null,
     /** BCP 47 language tag from the package metadata, if the book declares one. */
-    val language: String? = null
+    val language: String? = null,
+    val series: String? = null,
+    val seriesIndex: Float? = null
 )

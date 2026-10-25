@@ -33,16 +33,36 @@ data class BookEntity(
     val dateAdded: Long = Date().time,
     val lastRead: Long? = null,
     val fileSize: Long = 0L,
-    val totalReadingSeconds: Long = 0L
+    val totalReadingSeconds: Long = 0L,
+    /** Visible characters in the whole book, as the reader measured them; 0 = not yet. */
+    @ColumnInfo(defaultValue = "0")
+    val textLength: Int = 0,
+    /** The text each chapter holds, comma-separated, in reading order. */
+    val chapterWeights: String? = null,
+    /** Where the reader is, in words: a chapter title, or "Page 12 of 40". */
+    val positionLabel: String? = null,
+    val series: String? = null,
+    val seriesIndex: Float? = null,
+    /** What the file was before import converted it (TXT, MD, FB2, MOBI, AZW3, CBR). */
+    val sourceFormat: String? = null,
+    /** Whether the book's text is in the full-text index. */
+    @ColumnInfo(defaultValue = "0")
+    val textIndexed: Boolean = false,
 ) {
     fun toDomain() = Book(
         id = id, title = title, author = author,
-        filePath = filePath, format = BookFormat.valueOf(format),
+        filePath = filePath, format = BookFormat.fromName(format),
         coverPath = coverPath, totalPages = totalPages, currentPage = currentPage,
         scrollFraction = scrollFraction, progress = progress,
         isFavorite = isFavorite, readingStatus = ReadingStatus.valueOf(readingStatus),
         dateAdded = Date(dateAdded), lastRead = lastRead?.let { Date(it) },
-        fileSize = fileSize, totalReadingSeconds = totalReadingSeconds
+        fileSize = fileSize, totalReadingSeconds = totalReadingSeconds,
+        textLength = textLength,
+        chapterWeights = chapterWeights.toWeights(),
+        positionLabel = positionLabel,
+        series = series, seriesIndex = seriesIndex,
+        sourceFormat = sourceFormat,
+        textIndexed = textIndexed,
     )
 
     companion object {
@@ -55,7 +75,18 @@ data class BookEntity(
             isFavorite = book.isFavorite,
             readingStatus = book.readingStatus.name, dateAdded = book.dateAdded.time,
             lastRead = book.lastRead?.time, fileSize = book.fileSize,
-            totalReadingSeconds = book.totalReadingSeconds
+            totalReadingSeconds = book.totalReadingSeconds,
+            textLength = book.textLength,
+            chapterWeights = book.chapterWeights.toColumn(),
+            positionLabel = book.positionLabel,
+            series = book.series, seriesIndex = book.seriesIndex,
+            sourceFormat = book.sourceFormat,
+            textIndexed = book.textIndexed,
         )
     }
 }
+
+internal fun List<Int>.toColumn(): String? = if (isEmpty()) null else joinToString(",")
+
+internal fun String?.toWeights(): List<Int> =
+    this?.split(',')?.mapNotNull { it.trim().toIntOrNull() } ?: emptyList()

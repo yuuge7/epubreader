@@ -1,5 +1,6 @@
 package com.ebookreader.presentation.reader.pdf
 
+import com.ebookreader.presentation.reader.rememberSittingSeconds
 import android.view.GestureDetector
 import android.view.MotionEvent
 import androidx.compose.animation.*
@@ -16,11 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.recyclerview.widget.RecyclerView
 import com.ebookreader.domain.model.Bookmark
@@ -52,12 +50,6 @@ fun PdfReaderScreen(
     var currentPage by remember { mutableIntStateOf(0) }
     var totalPages  by remember { mutableIntStateOf(0) }
     val pdfViewRef  = remember { mutableStateOf<PdfRendererView?>(null) }
-
-    // Session timer — the ViewModel owns the clock so it pauses with the screen.
-    var sessionSeconds by remember { mutableLongStateOf(0L) }
-    LaunchedEffect(Unit) {
-        while (true) { delay(1000L); sessionSeconds = viewModel.currentSessionSeconds() }
-    }
 
     LaunchedEffect(bookId) { viewModel.loadBook(bookId) }
 
@@ -91,23 +83,11 @@ fun PdfReaderScreen(
         }
     }
 
-    // Only count time while the screen is in front of the user; flush position and
-    // elapsed time on every pause so a swipe-away kill cannot lose them.
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> viewModel.onScreenResumed()
-                Lifecycle.Event.ON_PAUSE -> viewModel.onScreenPaused()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            viewModel.onScreenPaused()
-        }
-    }
+    val sessionSeconds = rememberSittingSeconds(
+        onResume = viewModel::onScreenResumed,
+        onPause = viewModel::onScreenPaused,
+        elapsed = viewModel::currentSessionSeconds,
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {

@@ -2,4 +2,10 @@
 <resources>
     <!-- Night "paper", so a dark launch does not flash white before Compose draws. -->
     <color name="window_paper">#0F1013</color>
+    <!-- The home-screen widget: a card in the page colour, ink and bookcloth on it. -->
+    <color name="widget_page">#16181C</color>
+    <color name="widget_ink">#DCD8D0</color>
+    <color name="widget_graphite">#8B8F98</color>
+    <color name="widget_bookcloth">#C4736C</color>
+    <color name="widget_rule">#262930</color>
 </resources>

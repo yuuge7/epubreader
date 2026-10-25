@@ -56,6 +56,7 @@ interface BookDao {
         SET currentPage = :page,
             scrollFraction = :scrollFraction,
             progress = :progress,
+            positionLabel = COALESCE(:positionLabel, positionLabel),
             lastRead = :timestamp,
             readingStatus = CASE
                 WHEN readingStatus = 'FINISHED' AND :page >= :lastPageIndex THEN 'FINISHED'
@@ -69,6 +70,7 @@ interface BookDao {
         page: Int,
         scrollFraction: Float,
         progress: Float,
+        positionLabel: String?,
         lastPageIndex: Int,
         timestamp: Long
     )
@@ -119,7 +121,8 @@ interface BookDao {
         """
         UPDATE books
         SET currentPage = :page, scrollFraction = :scrollFraction, progress = :progress,
-            readingStatus = :status, lastRead = :lastRead, isFavorite = :isFavorite
+            readingStatus = :status, lastRead = :lastRead, isFavorite = :isFavorite,
+            positionLabel = :positionLabel
         WHERE id = :bookId
         """
     )
@@ -130,9 +133,52 @@ interface BookDao {
         progress: Float,
         status: String,
         lastRead: Long?,
-        isFavorite: Boolean
+        isFavorite: Boolean,
+        /**
+         * Where the reader is, in words. Null clears it: the place has moved, and a file
+         * from before labels were kept cannot say what to call the new one.
+         */
+        positionLabel: String?,
     )
 
     @Query("SELECT * FROM books WHERE filePath = :filePath LIMIT 1")
     suspend fun getBookByFilePath(filePath: String): BookEntity?
+
+    @Query("SELECT * FROM books WHERE id IN (:ids)")
+    suspend fun getBooksByIds(ids: List<Long>): List<BookEntity>
+
+    @Query("UPDATE books SET textLength = :textLength, chapterWeights = :chapterWeights WHERE id = :bookId")
+    suspend fun updateTextMetrics(bookId: Long, textLength: Int, chapterWeights: String?)
+
+    @Query("UPDATE books SET textIndexed = :indexed WHERE id = :bookId")
+    suspend fun setTextIndexed(bookId: Long, indexed: Boolean)
+
+    @Query("SELECT * FROM books WHERE format = 'EPUB' AND textIndexed = 0")
+    suspend fun getBooksNeedingTextIndex(): List<BookEntity>
+
+    @Query("SELECT * FROM books WHERE coverPath IS NULL AND format = :format")
+    suspend fun getBooksWithoutCover(format: String): List<BookEntity>
+
+    @Query("UPDATE books SET coverPath = :coverPath WHERE id = :bookId")
+    suspend fun updateCover(bookId: Long, coverPath: String?)
+
+    @Query("UPDATE books SET series = :series, seriesIndex = :seriesIndex WHERE id = :bookId")
+    suspend fun updateSeries(bookId: Long, series: String?, seriesIndex: Float?)
+
+    /** The rest of a series, in reading order. */
+    @Query("SELECT * FROM books WHERE series = :series ORDER BY seriesIndex IS NULL, seriesIndex, title")
+    suspend fun getBooksInSeries(series: String): List<BookEntity>
+
+    @Query("UPDATE books SET isFavorite = :isFavorite WHERE id IN (:ids)")
+    suspend fun updateFavorite(ids: List<Long>, isFavorite: Boolean)
+
+    @Query(
+        """
+        SELECT books.* FROM books
+        INNER JOIN book_collections ON book_collections.bookId = books.id
+        WHERE book_collections.collectionId = :collectionId
+        ORDER BY books.title
+        """
+    )
+    fun getBooksInCollection(collectionId: Long): Flow<List<BookEntity>>
 }

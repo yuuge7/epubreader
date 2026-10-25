@@ -13,13 +13,23 @@
     <!-- Keep screen on -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- The optional evening reminder for the daily reading goal, and putting it back
+         after a restart clears every alarm. Asked for only when the reminder is turned on. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Reading aloud goes on with the screen off, as media playback with a notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+
     <!--
-      The PDF viewer library declares these so it can download a PDF from a URL. This app
-      only ever calls initWithFile() on a book already in its own storage, so the app has
-      no reason to hold network permissions at all — an offline reader that ships INTERNET
-      is asking the user to take its privacy claims on faith.
+      Network access is for the online catalogues (OPDS) only: pages are fetched while the
+      reader browses one, and books are downloaded when they ask. Books themselves never
+      reach the network; the reader's WebView blocks every load that is not the book.
+      The PDF viewer library also declares ACCESS_NETWORK_STATE to download PDFs from a
+      URL, which this app never does.
     -->
-    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
 
@@ -69,7 +79,55 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="content" android:mimeType="application/epub+zip" />
             </intent-filter>
+
+            <!-- Formats converted on import: comics, plain text, Markdown, FB2, Kindle.
+                 The data elements of one filter combine, so this is every scheme with
+                 every type. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="text/markdown" />
+                <data android:mimeType="text/x-markdown" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/x-mobipocket-ebook" />
+                <data android:mimeType="application/vnd.amazon.mobi8-ebook" />
+                <data android:mimeType="application/vnd.amazon.ebook" />
+            </intent-filter>
         </activity>
+
+        <service
+            android:name=".data.readaloud.ReadAloudService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
+        <receiver
+            android:name=".presentation.widget.ContinueReadingWidget"
+            android:exported="false"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_continue_info" />
+        </receiver>
+
+        <receiver
+            android:name=".data.reminders.ReminderReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="androidx.core.content.FileProvider"

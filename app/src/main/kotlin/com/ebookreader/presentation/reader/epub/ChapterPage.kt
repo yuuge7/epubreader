@@ -2,7 +2,15 @@ package com.ebookreader.presentation.reader.epub
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.pm.ApplicationInfo
+import android.util.Log
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.net.Uri
+import android.graphics.Rect
+import android.view.ActionMode
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
@@ -23,6 +31,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.delay
+import com.ebookreader.domain.model.Highlight
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -69,6 +79,28 @@ internal data class PageConfig(
         .toString()
 }
 
+/** What can be done with selected text, offered ahead of the system's Copy and Share. */
+enum class SelectionAction(val title: String) {
+    HIGHLIGHT("Highlight"),
+    NOTE("Note"),
+    QUOTE("Quote card"),
+    SEARCH("Find in book"),
+}
+
+/** Selected text, located by offsets into the chapter's text. */
+data class TextSelection(val start: Int, val end: Int, val text: String)
+
+/** Calls into a loaded page, for read-aloud. Main thread only. */
+interface PageHandle {
+    /** The text at the top of the page, for read-aloud to start from; "" if none. */
+    fun firstVisibleText(callback: (String) -> Unit)
+    /**
+     * Marks [text], the sentence being read, and brings it into view; null clears the
+     * mark. Found by its words, after the one marked before it.
+     */
+    fun speakMark(text: String?)
+}
+
 /** What a page reports back. Only the page on screen is listened to. */
 internal interface PageEvents {
     /** See [ReaderScript]: true when the tap should turn the page. Any thread. */
@@ -77,6 +109,8 @@ internal interface PageEvents {
     fun onSwipe(direction: Int)
     fun onScroll(fraction: Float)
     fun onInternalLink(path: String, fragment: String?)
+    fun onHighlightTapped(id: Long)
+    fun onSelection(action: SelectionAction, selection: TextSelection)
     fun onPositionApplied(requestId: Long)
 }
 
@@ -104,10 +138,12 @@ internal fun ChapterPage(
     css: String,
     config: PageConfig,
     position: PositionRequest?,
+    /** This chapter's highlights: [Highlight.id], offsets and ink, painted onto the text. */
+    highlights: List<Highlight>,
     assets: WebViewAssetLoader,
     paper: Color,
     events: PageEvents,
-    onReady: () -> Unit,
+    onReady: (PageHandle) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var webView by remember { mutableStateOf<WebView?>(null) }
@@ -131,12 +167,25 @@ internal fun ChapterPage(
     LaunchedEffect(ready, config) {
         if (ready) webView?.evaluateJavascript("__reader.configure(${config.toJson()})", null)
     }
+    LaunchedEffect(ready, highlights) {
+        if (!ready) return@LaunchedEffect
+        val list = JSONArray()
+        highlights.forEach { h ->
+            list.put(
+                JSONObject().put("id", h.id).put("start", h.startOffset).put("end", h.endOffset)
+                    .put("color", h.color.ordinal)
+            )
+        }
+        webView?.evaluateJavascript("__reader.paintHighlights($list)", null)
+    }
     LaunchedEffect(ready, position) {
         val wv = webView ?: return@LaunchedEffect
         if (!ready || position == null) return@LaunchedEffect
         val js = when (val p = position.position) {
             is PagePosition.Fraction -> "__reader.goTo(${p.value.coerceIn(0f, 1f)})"
             is PagePosition.Anchor -> "__reader.goToAnchor(${JSONObject.quote(p.id)})"
+            is PagePosition.Search -> "__reader.findText(${JSONObject.quote(p.query)}, ${p.occurrence})"
+            is PagePosition.TextOffset -> "__reader.goToOffset(${p.offset})"
         }
         wv.evaluateJavascript(js, null)
         latestEvents.onPositionApplied(position.id)
@@ -144,8 +193,25 @@ internal fun ChapterPage(
 
     AndroidView(
         factory = { context ->
-            WebView(context).also { wv ->
+            ReaderWebView(context).also { wv ->
                 webView = wv
+                // In debug builds the page script's errors reach logcat; otherwise a
+                // broken reader action fails with no trace at all.
+                if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                    wv.webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                            Log.d("ReaderPage", "${message.message()} (line ${message.lineNumber()})")
+                            return true
+                        }
+                    }
+                }
+                wv.onSelectionAction = { action, done ->
+                    wv.evaluateJavascript("__reader.selection()") { json ->
+                        done()
+                        wv.evaluateJavascript("__reader.clearSelection()", null)
+                        parseSelection(json)?.let { latestEvents.onSelection(action, it) }
+                    }
+                }
                 wv.settings.applyReaderPolicy()
                 wv.webViewClient = object : WebViewClient() {
                     override fun shouldInterceptRequest(
@@ -178,7 +244,7 @@ internal fun ChapterPage(
                         view.evaluateJavascript(ReaderScript + "\n__reader.tagAlignment();", null)
                         if (!ready) {
                             ready = true
-                            latestOnReady()
+                            latestOnReady(WebViewPageHandle(view))
                         }
                     }
                 }
@@ -196,6 +262,11 @@ internal fun ChapterPage(
                     @JavascriptInterface
                     fun swipe(direction: Int) {
                         wv.post { if (isActive) latestEvents.onSwipe(direction) }
+                    }
+
+                    @JavascriptInterface
+                    fun highlightTapped(id: Long) {
+                        wv.post { if (isActive) latestEvents.onHighlightTapped(id) }
                     }
 
                     @JavascriptInterface
@@ -222,6 +293,77 @@ internal fun ChapterPage(
         },
         modifier = modifier,
     )
+}
+
+private fun parseSelection(json: String?): TextSelection? = runCatching {
+    if (json == null || json == "null") return null
+    val o = JSONObject(json)
+    TextSelection(o.getInt("start"), o.getInt("end"), o.getString("text"))
+}.getOrNull()
+
+private class WebViewPageHandle(private val view: WebView) : PageHandle {
+    override fun firstVisibleText(callback: (String) -> Unit) {
+        view.evaluateJavascript("__reader.firstVisibleText()") { json ->
+            callback(runCatching { JSONArray("[$json]").getString(0) }.getOrDefault(""))
+        }
+    }
+
+    override fun speakMark(text: String?) {
+        view.evaluateJavascript(
+            if (text == null) "__reader.speakClear()" else "__reader.speakFind(${JSONObject.quote(text)})",
+            null
+        )
+    }
+}
+
+/**
+ * The chapter's WebView, with the reader's own actions put at the front of the toolbar
+ * that comes up over selected text. The system keeps its Copy, Share and Select all, and
+ * apps that offer text actions (a dictionary, a translator) add theirs after.
+ */
+@SuppressLint("ViewConstructor")
+private class ReaderWebView(context: android.content.Context) : WebView(context) {
+    /** Called with the chosen action and a callback that closes the toolbar. */
+    var onSelectionAction: (SelectionAction, done: () -> Unit) -> Unit = { _, done -> done() }
+
+    override fun startActionMode(callback: ActionMode.Callback?, type: Int): ActionMode? =
+        super.startActionMode(callback?.let { SelectionCallback(it) }, type)
+
+    override fun startActionMode(callback: ActionMode.Callback?): ActionMode? =
+        super.startActionMode(callback?.let { SelectionCallback(it) })
+
+    private inner class SelectionCallback(private val inner: ActionMode.Callback) : ActionMode.Callback2() {
+        override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+            val created = inner.onCreateActionMode(mode, menu)
+            SelectionAction.entries.forEachIndexed { i, action ->
+                menu.add(Menu.NONE, MENU_BASE + i, i, action.title)
+            }
+            return created
+        }
+
+        override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean =
+            inner.onPrepareActionMode(mode, menu)
+
+        override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+            val action = SelectionAction.entries.getOrNull(item.itemId - MENU_BASE)
+                ?: return inner.onActionItemClicked(mode, item)
+            // The selection has to be read before the toolbar closes, which clears it.
+            onSelectionAction(action) { mode.finish() }
+            return true
+        }
+
+        override fun onDestroyActionMode(mode: ActionMode) = inner.onDestroyActionMode(mode)
+
+        override fun onGetContentRect(mode: ActionMode, view: View, outRect: Rect) {
+            if (inner is ActionMode.Callback2) inner.onGetContentRect(mode, view, outRect)
+            else super.onGetContentRect(mode, view, outRect)
+        }
+    }
+
+    private companion object {
+        /** Well clear of the ids WebView gives its own items. */
+        const val MENU_BASE = 0x5EAD
+    }
 }
 
 private fun refused() = WebResourceResponse(

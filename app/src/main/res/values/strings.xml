@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">EBook Reader</string>
+    <string name="widget_continue">CONTINUE</string>
+    <string name="widget_description">The book you are reading, where you left it, and your reading streak</string>
+    <string name="widget_label">Continue reading</string>
+    <string name="widget_placeholder">Where you left your book</string>
 </resources>

@@ -72,7 +72,8 @@ class ReaderStyleTest {
         assertTrue(night.contains("filter:brightness(0.85)"))
 
         val paper = css(dark = false)
-        assertFalse(paper.contains("color:inherit"))
+        // The reader's own marks inherit their colour on any page; the book's text does not.
+        assertFalse(paper.contains("body *{color:inherit"))
         assertFalse(paper.contains("filter:"))
     }
 

@@ -2,4 +2,10 @@
 <resources>
     <!-- The window behind Compose, seen during launch: the "paper" token. -->
     <color name="window_paper">#FBF9F4</color>
+    <!-- The home-screen widget: a card in the page colour, ink and bookcloth on it. -->
+    <color name="widget_page">#FFFFFF</color>
+    <color name="widget_ink">#171A1F</color>
+    <color name="widget_graphite">#6A6E77</color>
+    <color name="widget_bookcloth">#7A3033</color>
+    <color name="widget_rule">#E2DED4</color>
 </resources>

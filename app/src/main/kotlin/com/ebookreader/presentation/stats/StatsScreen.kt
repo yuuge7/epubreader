@@ -136,6 +136,14 @@ fun StatsScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     item {
+                        ReadingDaysSection(
+                            days = uiState.days,
+                            goals = uiState.goals,
+                            onSetGoals = viewModel::setGoals,
+                        )
+                    }
+
+                    item {
                         Text(
                             "Overview",
                             style = MaterialTheme.typography.titleLarge

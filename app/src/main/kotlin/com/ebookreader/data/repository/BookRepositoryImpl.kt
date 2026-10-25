@@ -3,11 +3,13 @@ package com.ebookreader.data.repository
 import android.content.Context
 import com.ebookreader.data.epub.EpubParser
 import com.ebookreader.data.local.dao.BookDao
+import com.ebookreader.data.local.dao.BookTextDao
 import com.ebookreader.data.local.dao.BookmarkDao
 import com.ebookreader.data.local.dao.ReadingSessionDao
 import com.ebookreader.data.local.entity.BookEntity
 import com.ebookreader.data.local.entity.BookmarkEntity
 import com.ebookreader.data.local.entity.ReadingSessionEntity
+import com.ebookreader.data.local.entity.toColumn
 import com.ebookreader.domain.model.*
 import com.ebookreader.domain.repository.BookRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -25,6 +27,7 @@ class BookRepositoryImpl @Inject constructor(
     private val bookDao: BookDao,
     private val bookmarkDao: BookmarkDao,
     private val readingSessionDao: ReadingSessionDao,
+    private val bookTextDao: BookTextDao,
     private val epubParser: EpubParser,
     @ApplicationContext private val context: Context
 ) : BookRepository {
@@ -45,6 +48,8 @@ class BookRepositoryImpl @Inject constructor(
                 .map { it.map { entity -> entity.toDomain() } }
             FilterOption.EPUB -> bookDao.getBooksByFormat(BookFormat.EPUB.name)
                 .map { it.map { entity -> entity.toDomain() } }
+            FilterOption.COMIC -> bookDao.getBooksByFormat(BookFormat.COMIC.name)
+                .map { it.map { entity -> entity.toDomain() } }
             FilterOption.FAVORITES -> getFavoriteBooks()
             FilterOption.READING -> bookDao.getBooksByStatus(ReadingStatus.READING.name)
                 .map { it.map { entity -> entity.toDomain() } }
@@ -61,6 +66,25 @@ class BookRepositoryImpl @Inject constructor(
 
     override fun getRecentBooks(): Flow<List<Book>> =
         bookDao.getRecentBooks().map { it.map { entity -> entity.toDomain() } }
+
+    override fun getBooksInCollection(collectionId: Long): Flow<List<Book>> =
+        bookDao.getBooksInCollection(collectionId).map { it.map { entity -> entity.toDomain() } }
+
+    override suspend fun getBooksInSeries(series: String): List<Book> =
+        bookDao.getBooksInSeries(series).map { it.toDomain() }
+
+    override suspend fun getBooksByIds(ids: List<Long>): List<Book> =
+        if (ids.isEmpty()) emptyList() else bookDao.getBooksByIds(ids).map { it.toDomain() }
+
+    override suspend fun updateTextMetrics(bookId: Long, textLength: Int, chapterWeights: List<Int>) =
+        bookDao.updateTextMetrics(bookId, textLength, chapterWeights.toColumn())
+
+    override suspend fun updateSeries(bookId: Long, series: String?, seriesIndex: Float?) =
+        bookDao.updateSeries(bookId, series?.trim()?.ifBlank { null }, seriesIndex)
+
+    override suspend fun updateFavorite(bookIds: List<Long>, isFavorite: Boolean) {
+        if (bookIds.isNotEmpty()) bookDao.updateFavorite(bookIds, isFavorite)
+    }
 
     override suspend fun getBookById(id: Long): Book? =
         bookDao.getBookById(id)?.toDomain()
@@ -84,6 +108,8 @@ class BookRepositoryImpl @Inject constructor(
      */
     override suspend fun deleteBook(book: Book) {
         bookDao.deleteBook(BookEntity.fromDomain(book))
+        // The search index is a virtual table, which takes no foreign keys.
+        bookTextDao.deleteForBook(book.id)
         withContext(Dispatchers.IO) {
             // Only ever delete inside the app's own storage. If a future version starts
             // referencing books where the user keeps them, this must not reach out and
@@ -108,13 +134,15 @@ class BookRepositoryImpl @Inject constructor(
         page: Int,
         totalPages: Int,
         scrollFraction: Float,
-        progress: Float
+        progress: Float,
+        positionLabel: String?,
     ) {
         bookDao.updateReadingPosition(
             bookId = bookId,
             page = page.coerceAtLeast(0),
             scrollFraction = scrollFraction.coerceIn(0f, 1f),
             progress = progress.coerceIn(0f, 1f),
+            positionLabel = positionLabel,
             lastPageIndex = (totalPages - 1).coerceAtLeast(0),
             timestamp = Date().time
         )

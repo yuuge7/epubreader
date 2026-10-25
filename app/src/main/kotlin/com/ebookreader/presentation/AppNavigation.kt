@@ -11,8 +11,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.ebookreader.domain.model.AppSettings
 import com.ebookreader.presentation.common.ReaderTheme
+import com.ebookreader.presentation.catalog.CatalogScreen
 import com.ebookreader.presentation.library.LibraryScreen
 import com.ebookreader.presentation.onboarding.OnboardingScreen
+import com.ebookreader.presentation.reader.comic.ComicReaderScreen
 import com.ebookreader.presentation.reader.epub.EpubReaderScreen
 import com.ebookreader.presentation.reader.pdf.PdfReaderScreen
 import com.ebookreader.presentation.settings.SettingsScreen
@@ -28,8 +30,18 @@ fun AppNavigation(
     settings: AppSettings,
     onEditSettings: ((AppSettings) -> AppSettings) -> Unit,
     pendingImportUri: Uri? = null,
-    onPendingImportHandled: () -> Unit = {}
+    onPendingImportHandled: () -> Unit = {},
+    pendingOpenBook: com.ebookreader.domain.model.Book? = null,
+    onPendingOpenHandled: () -> Unit = {},
 ) {
+    // The widget's book opens over the library, so Back from it lands there.
+    LaunchedEffect(pendingOpenBook, startDestination) {
+        val book = pendingOpenBook ?: return@LaunchedEffect
+        if (startDestination != Screen.Library.route) return@LaunchedEffect
+        navController.navigate(readerRoute(book)) { launchSingleTop = true }
+        onPendingOpenHandled()
+    }
+
     NavHost(
         navController = navController,
         startDestination = startDestination,
@@ -74,15 +86,14 @@ fun AppNavigation(
                 onEditSettings = onEditSettings,
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                 onNavigateToStats = { navController.navigate(Screen.Stats.route) },
+                onNavigateToCatalog = { navController.navigate(Screen.Catalog.route) },
                 pendingImportUri = pendingImportUri,
                 onPendingImportHandled = onPendingImportHandled,
-                onOpenBook = { book ->
-                    if (book.format.name == "PDF") {
-                        navController.navigate(Screen.PdfReader.createRoute(book.id))
-                    } else {
-                        navController.navigate(Screen.EpubReader.createRoute(book.id))
-                    }
-                }
+                onOpenBook = { book -> navController.navigate(readerRoute(book)) },
+                onOpenBookAt = { book, chapter, query ->
+                    navController.navigate(Screen.EpubReader.createRoute(book.id, chapter, query))
+                },
+                onOpenBookStats = { book -> navController.navigate(Screen.BookStats.createRoute(book.id)) },
             )
         }
 
@@ -101,17 +112,51 @@ fun AppNavigation(
 
         composable(
             route = Screen.EpubReader.route,
-            arguments = listOf(navArgument("bookId") { type = NavType.LongType })
+            arguments = listOf(
+                navArgument("bookId") { type = NavType.LongType },
+                navArgument("chapter") { type = NavType.IntType; defaultValue = -1 },
+                navArgument("q") { type = NavType.StringType; defaultValue = "" },
+            )
         ) { backStackEntry ->
-            val bookId = backStackEntry.arguments?.getLong("bookId") ?: return@composable
+            val args = backStackEntry.arguments ?: return@composable
+            val bookId = args.getLong("bookId")
             ReaderTheme(settings.theme, settings.readingTheme) {
                 EpubReaderScreen(
                     bookId = bookId,
+                    startChapter = args.getInt("chapter", -1),
+                    searchQuery = args.getString("q")?.takeIf { it.isNotBlank() },
                     settings = settings,
                     onEditSettings = onEditSettings,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
+        }
+
+        composable(
+            route = Screen.ComicReader.route,
+            arguments = listOf(navArgument("bookId") { type = NavType.LongType })
+        ) {
+            ReaderTheme(settings.theme, settings.readingTheme) {
+                ComicReaderScreen(
+                    rightToLeft = settings.comicRightToLeft,
+                    onToggleDirection = { onEditSettings { it.copy(comicRightToLeft = !it.comicRightToLeft) } },
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+        }
+
+        composable(
+            route = Screen.BookStats.route,
+            arguments = listOf(navArgument("bookId") { type = NavType.LongType })
+        ) {
+            com.ebookreader.presentation.stats.BookStatsScreen(onNavigateBack = { navController.popBackStack() })
+        }
+
+        composable(Screen.Catalog.route) {
+            CatalogScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onOpenBook = { book -> navController.navigate(readerRoute(book)) },
+            )
         }
 
         composable(Screen.Settings.route) {
@@ -149,4 +194,11 @@ fun AppNavigation(
             )
         }
     }
+}
+
+/** Each kind of book has its own reader. */
+private fun readerRoute(book: com.ebookreader.domain.model.Book): String = when (book.format) {
+    com.ebookreader.domain.model.BookFormat.PDF -> Screen.PdfReader.createRoute(book.id)
+    com.ebookreader.domain.model.BookFormat.COMIC -> Screen.ComicReader.createRoute(book.id)
+    com.ebookreader.domain.model.BookFormat.EPUB -> Screen.EpubReader.createRoute(book.id)
 }

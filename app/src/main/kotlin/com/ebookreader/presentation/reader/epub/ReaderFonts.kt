@@ -1,5 +1,6 @@
 package com.ebookreader.presentation.reader.epub
 
+import android.annotation.SuppressLint
 import android.content.res.Resources
 import android.webkit.WebResourceResponse
 import androidx.annotation.FontRes
@@ -130,6 +131,8 @@ internal class ReaderFontPathHandler(private val resources: Resources) : WebView
         .flatMap { it.files }
         .associateBy { it.fileName }
 
+    // A font resource is a raw file underneath, which is what the page needs.
+    @SuppressLint("ResourceType")
     override fun handle(path: String): WebResourceResponse? {
         val file = files[path] ?: return null
         return WebResourceResponse(

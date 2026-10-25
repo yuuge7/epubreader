@@ -2,6 +2,9 @@ package com.ebookreader.presentation.common
 
 import java.util.Locale
 
+/** "1 sitting", "3 sittings": English plurals by adding "s", which is all the app's nouns need. */
+fun plural(n: Int, word: String): String = if (n == 1) "1 $word" else "$n ${word}s"
+
 /** Format seconds into a human-readable session time: "5m 23s" or "1h 2m" */
 fun formatSessionTime(seconds: Long): String {
     val h = seconds / 3600
