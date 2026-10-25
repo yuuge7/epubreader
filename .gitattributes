@@ -14,3 +14,5 @@ gradlew text eol=lf
 *.aab binary
 *.jks binary
 *.keystore binary
+*.ttf binary
+*.otf binary

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night "paper", so a dark launch does not flash white before Compose draws. -->
+    <color name="window_paper">#0F1013</color>
+</resources>

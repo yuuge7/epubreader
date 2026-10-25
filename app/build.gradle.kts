@@ -144,4 +144,6 @@ dependencies {
 
     // RecyclerView (for PDF scrolling helper)
     implementation(libs.androidx.recyclerview)
+
+    testImplementation(libs.junit)
 }

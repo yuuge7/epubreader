@@ -10,12 +10,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.ebookreader.domain.model.AppSettings
+import com.ebookreader.presentation.common.ReaderTheme
 import com.ebookreader.presentation.library.LibraryScreen
 import com.ebookreader.presentation.onboarding.OnboardingScreen
 import com.ebookreader.presentation.reader.epub.EpubReaderScreen
 import com.ebookreader.presentation.reader.pdf.PdfReaderScreen
 import com.ebookreader.presentation.settings.SettingsScreen
 import com.ebookreader.presentation.stats.MonthlyHistoryScreen
+import com.ebookreader.presentation.stats.SessionHistoryScreen
 import com.ebookreader.presentation.stats.YearlyHistoryScreen
 import com.ebookreader.presentation.stats.StatsScreen
 
@@ -89,11 +91,12 @@ fun AppNavigation(
             arguments = listOf(navArgument("bookId") { type = NavType.LongType })
         ) { backStackEntry ->
             val bookId = backStackEntry.arguments?.getLong("bookId") ?: return@composable
-            PdfReaderScreen(
-                bookId = bookId,
-                settings = settings,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            ReaderTheme(settings.theme, settings.readingTheme) {
+                PdfReaderScreen(
+                    bookId = bookId,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(
@@ -101,11 +104,13 @@ fun AppNavigation(
             arguments = listOf(navArgument("bookId") { type = NavType.LongType })
         ) { backStackEntry ->
             val bookId = backStackEntry.arguments?.getLong("bookId") ?: return@composable
-            EpubReaderScreen(
-                bookId = bookId,
-                settings = settings,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            ReaderTheme(settings.theme, settings.readingTheme) {
+                EpubReaderScreen(
+                    bookId = bookId,
+                    settings = settings,
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
         }
 
         composable(Screen.Settings.route) {
@@ -120,7 +125,8 @@ fun AppNavigation(
             StatsScreen(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToMonthlyHistory = { navController.navigate(Screen.MonthlyHistory.route) },
-                onNavigateToYearlyHistory = { navController.navigate(Screen.YearlyHistory.route) }
+                onNavigateToYearlyHistory = { navController.navigate(Screen.YearlyHistory.route) },
+                onNavigateToSessionHistory = { navController.navigate(Screen.SessionHistory.route) }
             )
         }
 
@@ -132,6 +138,12 @@ fun AppNavigation(
 
         composable(Screen.YearlyHistory.route) {
             YearlyHistoryScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Screen.SessionHistory.route) {
+            SessionHistoryScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

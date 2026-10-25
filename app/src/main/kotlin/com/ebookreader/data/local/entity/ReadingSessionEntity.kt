@@ -21,6 +21,14 @@ data class ReadingSessionEntity(
     val bookId: Long,
     @ColumnInfo(defaultValue = "''")
     val bookTitle: String = "",
+    /** Seconds actually spent reading. Excludes any gaps inside the sitting. */
     val durationSeconds: Long,
+    /**
+     * When the sitting began. Older rows predate this column and were backfilled from
+     * [timestamp] minus the duration, which is the best estimate available for them.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val startedAt: Long = 0L,
+    /** When the sitting last stopped. Moves forward each time the sitting is extended. */
     val timestamp: Long = Date().time
 )

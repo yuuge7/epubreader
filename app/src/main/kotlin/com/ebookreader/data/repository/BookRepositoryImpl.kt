@@ -149,18 +149,48 @@ class BookRepositoryImpl @Inject constructor(
     override suspend fun getBookmarkByPage(bookId: Long, page: Int): Bookmark? =
         bookmarkDao.getBookmarkByPage(bookId, page)?.toDomain()
 
+    /**
+     * Records a stretch of reading time.
+     *
+     * The reader flushes often — every `ON_PAUSE`, and once a minute while it is open —
+     * because that is what makes an unexpected kill lose nothing. Writing a row per flush
+     * is what turned one evening into a list of fragments, so a stretch that continues the
+     * sitting already in progress extends that row instead of starting another. See
+     * [ReadingSessionPolicy].
+     */
     override suspend fun addReadingSeconds(bookId: Long, seconds: Long) {
-        if (seconds > 0) {
+        if (seconds <= 0) return
+        val now = System.currentTimeMillis()
+        val open = readingSessionDao.getLatestSessionForBook(bookId)
+
+        if (open != null &&
+            ReadingSessionPolicy.continuesSitting(open.startedAt, open.timestamp, now)
+        ) {
             bookDao.addReadingSeconds(bookId, seconds)
-            readingSessionDao.insertSession(
-                ReadingSessionEntity(
-                    bookId = bookId,
-                    // Snapshot the title so the session survives the book being removed.
-                    bookTitle = bookDao.getBookById(bookId)?.title ?: "Unknown Book",
-                    durationSeconds = seconds
-                )
+            readingSessionDao.extendSession(
+                id = open.id,
+                durationSeconds = open.durationSeconds + seconds,
+                endedAt = now
             )
+            return
         }
+
+        // Nothing to attach to. A stretch this short on its own is someone opening a book
+        // and backing straight out, which should leave no trace at all — including in the
+        // book's running total, so the total and the history cannot disagree.
+        if (seconds < ReadingSessionPolicy.MIN_SESSION_SECONDS) return
+
+        bookDao.addReadingSeconds(bookId, seconds)
+        readingSessionDao.insertSession(
+            ReadingSessionEntity(
+                bookId = bookId,
+                // Snapshot the title so the session survives the book being removed.
+                bookTitle = bookDao.getBookById(bookId)?.title ?: "Unknown Book",
+                durationSeconds = seconds,
+                startedAt = now - seconds * 1000L,
+                timestamp = now
+            )
+        )
     }
 
     override fun getAllReadingSessions(): Flow<List<ReadingSession>> =
@@ -171,7 +201,13 @@ class BookRepositoryImpl @Inject constructor(
                     bookId = entity.bookId,
                     bookTitle = entity.bookTitle.ifBlank { "Unknown Book" },
                     durationSeconds = entity.durationSeconds,
-                    timestamp = Date(entity.timestamp)
+                    // Rows written before startedAt existed were backfilled by the v4 -> v5
+                    // migration; a zero here would only survive a hand-edited database.
+                    startedAt = Date(
+                        entity.startedAt.takeIf { it > 0L }
+                            ?: (entity.timestamp - entity.durationSeconds * 1000L)
+                    ),
+                    endedAt = Date(entity.timestamp)
                 )
             }
         }

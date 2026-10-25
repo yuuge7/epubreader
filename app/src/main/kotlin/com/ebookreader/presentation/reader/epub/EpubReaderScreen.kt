@@ -6,7 +6,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,16 +28,21 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.ebookreader.presentation.common.formatSessionTime
-import com.ebookreader.presentation.common.formatTotalReadingTime
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.BinderyColors
+import com.ebookreader.presentation.common.BarEdge
+import com.ebookreader.presentation.common.BinderyCard
+import com.ebookreader.presentation.common.ReaderBar
+import com.ebookreader.presentation.common.ReaderProgressFooter
+import com.ebookreader.presentation.common.SessionClock
+import com.ebookreader.presentation.common.toCssHex
+import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ebookreader.domain.model.AppSettings
-import com.ebookreader.domain.model.AppTheme
 import com.ebookreader.domain.model.Bookmark
 import com.ebookreader.domain.model.EpubChapter
 import com.ebookreader.domain.model.ScrollDirection
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,14 +53,9 @@ fun EpubReaderScreen(
     viewModel: EpubReaderViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // AppTheme.SYSTEM must follow the device, otherwise the app chrome goes dark
-    // while the page stays blinding white.
-    val isDark = when (settings.theme) {
-        AppTheme.DARK -> true
-        AppTheme.SYSTEM -> isSystemInDarkTheme()
-        else -> false
-    }
-    val isSepia = settings.theme == AppTheme.SEPIA
+    // ReaderTheme has already put the reading palette in scope, so the page and the
+    // chrome around it are always the same theme.
+    val pageColors = Bindery.colors
     val isHorizontal = settings.readerScrollDirection == ScrollDirection.HORIZONTAL
 
     LaunchedEffect(bookId) { viewModel.loadBook(bookId, settings.fontSize) }
@@ -125,8 +124,7 @@ fun EpubReaderScreen(
                     baseUrl = uiState.currentChapterBaseUrl,
                     pendingAnchor = uiState.pendingScrollAnchor,
                     restoreFraction = uiState.pendingRestoreFraction,
-                    isDarkMode = isDark,
-                    isSepia = isSepia,
+                    pageColors = pageColors,
                     onTap = viewModel::toggleControls,
                     onScrollProgress = viewModel::updateScrollProgress,
                     onInternalLink = { path, fragment ->
@@ -172,10 +170,7 @@ fun EpubReaderScreen(
                     exit = fadeOut() + slideOutVertically(),
                     modifier = Modifier.align(Alignment.TopCenter)
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-                        shadowElevation = 4.dp
-                    ) {
+                    ReaderBar(BarEdge.Top) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -190,7 +185,6 @@ fun EpubReaderScreen(
                                 Text(
                                     uiState.bookTitle,
                                     style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis
                                 )
                                 uiState.chapters.getOrNull(uiState.currentChapterIndex)?.let {
@@ -206,11 +200,7 @@ fun EpubReaderScreen(
                                             modifier = Modifier.weight(1f, fill = false)
                                         )
                                         if (sessionSeconds > 0) {
-                                            Text(
-                                                "⏱ ${formatSessionTime(sessionSeconds)}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.primary
-                                            )
+                                            SessionClock(sessionSeconds)
                                         }
                                     }
                                 }
@@ -259,10 +249,7 @@ fun EpubReaderScreen(
                     exit = fadeOut() + slideOutVertically { it },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-                        shadowElevation = 4.dp
-                    ) {
+                    ReaderBar(BarEdge.Bottom) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -321,36 +308,11 @@ fun EpubReaderScreen(
                                         )
                                     }
                                 }
-                                LinearProgressIndicator(
-                                    progress = { uiState.overallReadingProgress },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                                Spacer(Modifier.height(2.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        "${(uiState.overallReadingProgress * 100).roundToInt()}% read",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    val totalFormatted = formatTotalReadingTime(uiState.totalReadingSeconds)
-                                    if (totalFormatted.isNotEmpty()) {
-                                        Text(
-                                            "Total: $totalFormatted",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            } else {
-                                // Single chapter book — just show progress
-                                LinearProgressIndicator(
-                                    progress = { uiState.overallReadingProgress },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
                             }
+                            ReaderProgressFooter(
+                                progress = uiState.overallReadingProgress,
+                                totalReadingSeconds = uiState.totalReadingSeconds,
+                            )
                         }
                     }
                 }
@@ -465,8 +427,7 @@ private fun EpubWebView(
     baseUrl: String,
     pendingAnchor: String?,
     restoreFraction: Float?,
-    isDarkMode: Boolean,
-    isSepia: Boolean,
+    pageColors: BinderyColors,
     onTap: () -> Unit,
     onScrollProgress: (Float) -> Unit,
     onInternalLink: (path: String, fragment: String?) -> Unit,
@@ -474,17 +435,9 @@ private fun EpubWebView(
     onRestoreConsumed: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bg = when { isDarkMode -> "#1a1a1a"; isSepia -> "#f8f0e3"; else -> "#ffffff" }
-    val fg = when { isDarkMode -> "#e0e0e0"; isSepia -> "#5b4636"; else -> "#000000" }
-
-    val themedHtml = html.replace(
-        Regex("<style id=\"epub-reader-base\">", RegexOption.IGNORE_CASE),
-        """<style id="epub-reader-base">body{background-color:$bg!important;color:$fg!important;}"""
-    )
-    // Bottom padding so the last lines are never hidden by the floating bottom bar.
-    val documentHtml = themedHtml + """
-        <style>body { padding-bottom: 110px !important; }</style>
-    """.trimIndent()
+    // Whole chapters run to hundreds of KB, so the themed copy is built once per chapter
+    // and palette rather than on every recomposition.
+    val documentHtml = remember(html, pageColors) { themeChapter(html, pageColors) }
     val resolvedBaseUrl = baseUrl.ifBlank { "file:///android_asset/" }
 
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
@@ -576,8 +529,10 @@ private fun EpubWebView(
                     setSupportZoom(true)
                     builtInZoomControls = true
                     displayZoomControls = false
-                    loadWithOverviewMode = true
-                    useWideViewPort = true
+                    // Lay chapters out at the screen's width. The wide viewport made the
+                    // WebView render a ~980px desktop page and zoom it out, so the chosen
+                    // font size came out at a fraction of its size on a phone.
+                    useWideViewPort = false
                 }
                 wv.webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(
@@ -642,6 +597,9 @@ private fun EpubWebView(
         },
         update = { wv ->
             webViewRef.value = wv
+            // Paint the view itself in the page colour, so the gap while a chapter loads
+            // is the page and not a white flash.
+            wv.setBackgroundColor(pageColors.paper.toArgb())
             val document = resolvedBaseUrl to documentHtml
             if (loadedDocument.value != document) {
                 loadedDocument.value = document
@@ -657,6 +615,21 @@ private fun EpubWebView(
         },
         modifier = modifier
     )
+}
+
+/** The chapter as parsed, recoloured for the reading theme (the parser emits the tag). */
+private fun themeChapter(html: String, page: BinderyColors): String {
+    val bg = page.paper.toCssHex()
+    val fg = page.ink.toCssHex()
+    val link = page.bookcloth.toCssHex()
+    val themed = html.replace(
+        """<style id="epub-reader-base">""",
+        """<style id="epub-reader-base">html,body{background-color:$bg!important;color:$fg!important;}a,a:visited{color:$link!important;}"""
+    )
+    // Bottom padding so the last lines are never hidden by the floating bottom bar.
+    return themed + """
+        <style>body { padding-bottom: 110px !important; }</style>
+    """.trimIndent()
 }
 
 /**
@@ -689,9 +662,8 @@ private fun TableOfContentsPanel(
     onChapterSelected: (Int) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Text("Table of Contents",
+        Text("Contents",
             style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp))
         LazyColumn(
             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -744,7 +716,6 @@ private fun EpubBookmarksPanel(
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Text("Bookmarks",
             style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp))
         if (bookmarks.isEmpty()) {
             Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -761,15 +732,9 @@ private fun EpubBookmarksPanel(
                 modifier = Modifier.heightIn(max = 400.dp)
             ) {
                 items(bookmarks, key = { it.id }) { bookmark ->
-                    Card(
+                    BinderyCard(
                         onClick = { onJumpToChapter(bookmark.page) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (bookmark.page == currentChapterIndex)
-                                MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surface
-                        ),
-                        border = if (bookmark.page == currentChapterIndex)
-                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
+                        selected = bookmark.page == currentChapterIndex
                     ) {
                         Row(modifier = Modifier.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically) {
