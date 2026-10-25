@@ -16,5 +16,5 @@ object EpubModule {
     @Provides
     @Singleton
     fun provideEpubParser(@ApplicationContext context: Context): EpubParser =
-        EpubParser(context)
+        EpubParser(context.cacheDir)
 }

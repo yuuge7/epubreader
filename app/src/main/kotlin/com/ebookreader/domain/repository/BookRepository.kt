@@ -16,7 +16,8 @@ interface BookRepository {
     suspend fun deleteBook(book: Book)
     /**
      * Saves where the reader is. [scrollFraction] is the position inside [page]
-     * (0f top, 1f bottom) and is only meaningful for EPUB.
+     * (0f top, 1f bottom) and is only meaningful for EPUB; [progress] is the share of
+     * the whole book read, as the reader measures it.
      *
      * This never marks a book FINISHED on its own — call [markBookFinished] for that.
      */
@@ -24,7 +25,8 @@ interface BookRepository {
         bookId: Long,
         page: Int,
         totalPages: Int,
-        scrollFraction: Float = 0f
+        scrollFraction: Float = 0f,
+        progress: Float
     )
 
     suspend fun markBookFinished(bookId: Long, totalPages: Int)

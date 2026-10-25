@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   build:
-    name: Assemble debug
+    name: Test and assemble debug
     runs-on: ubuntu-latest
 
     steps:
@@ -36,6 +36,9 @@ jobs:
       # than depending on how the repository was checked out.
       - name: Make the Gradle wrapper executable
         run: chmod +x ./gradlew
+
+      - name: Run unit tests
+        run: ./gradlew --no-daemon --console=plain :app:testDebugUnitTest
 
       - name: Assemble debug APK
         run: ./gradlew --no-daemon --console=plain :app:assembleDebug

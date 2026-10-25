@@ -17,6 +17,16 @@ interface ReadingSessionDao {
     @Query("SELECT * FROM reading_sessions ORDER BY timestamp DESC")
     fun getAllSessions(): Flow<List<ReadingSessionEntity>>
 
+    /** The most recent sitting for a book — the candidate to extend rather than replace. */
+    @Query("SELECT * FROM reading_sessions WHERE bookId = :bookId ORDER BY timestamp DESC LIMIT 1")
+    suspend fun getLatestSessionForBook(bookId: Long): ReadingSessionEntity?
+
+    @Query(
+        "UPDATE reading_sessions SET durationSeconds = :durationSeconds, timestamp = :endedAt " +
+            "WHERE id = :id"
+    )
+    suspend fun extendSession(id: Long, durationSeconds: Long, endedAt: Long)
+
     /** One-shot read for export; the Flow variant never completes. */
     @Query("SELECT * FROM reading_sessions ORDER BY timestamp DESC")
     suspend fun getAllSessionsOnce(): List<ReadingSessionEntity>

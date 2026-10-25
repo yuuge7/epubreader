@@ -9,12 +9,13 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ebookreader.presentation.common.formatTotalReadingTime
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.BinderyCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,7 +28,7 @@ fun MonthlyHistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Monthly History", fontWeight = FontWeight.Bold) },
+                title = { Text("Monthly History") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -54,11 +55,8 @@ fun MonthlyHistoryScreen(
                     }
                 } else {
                     items(uiState.monthlyHistory) { month ->
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                            )
+                        BinderyCard(
+                            modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
                                 modifier = Modifier.padding(16.dp),
@@ -71,7 +69,6 @@ fun MonthlyHistoryScreen(
                                     Text(
                                         month.monthName,
                                         style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -83,8 +80,7 @@ fun MonthlyHistoryScreen(
                                 }
                                 Text(
                                     formatTotalReadingTime(month.totalSeconds),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
+                                    style = Bindery.type.numeral,
                                     color = MaterialTheme.colorScheme.primary,
                                     maxLines = 1
                                 )

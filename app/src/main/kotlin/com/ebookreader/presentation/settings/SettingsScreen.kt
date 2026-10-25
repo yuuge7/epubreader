@@ -11,22 +11,24 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ebookreader.BuildConfig
 import com.ebookreader.domain.model.*
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.ReadingThemePicker
+import com.ebookreader.presentation.common.label
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
-    onSettingsChange: (AppSettings) -> Unit,
+    onEditSettings: ((AppSettings) -> AppSettings) -> Unit,
     onNavigateBack: () -> Unit,
 ) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings", fontWeight = FontWeight.Bold) },
+                title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
@@ -44,40 +46,31 @@ fun SettingsScreen(
             // ── Appearance ────────────────────────────────────────────────
             SettingsSectionHeader("Appearance", Icons.Default.Palette)
 
-            SettingsItem("Theme", settings.theme.displayName, Icons.Default.DarkMode) {
+            SettingsItem("App theme", settings.theme.description, Icons.Default.DarkMode) {
                 ThemeSelector(
                     currentTheme = settings.theme
-                ) { onSettingsChange(settings.copy(theme = it)) }
+                ) { onEditSettings { s -> s.copy(theme = it) } }
             }
 
-            // Track the drag locally. Writing on every onValueChange put a DataStore write
-            // and a full settings re-emission on each frame of the gesture, which in turn
-            // re-rendered the open EPUB chapter; only the value the user settles on is saved.
-            var fontSizeDraft by remember { mutableStateOf<Float?>(null) }
-            val shownFontSize = fontSizeDraft ?: settings.fontSize
-
-            SettingsItem("Font Size", "${shownFontSize.toInt()}sp", Icons.Default.FormatSize) {
-                Column {
-                    Slider(
-                        value = shownFontSize,
-                        onValueChange = { fontSizeDraft = it },
-                        onValueChangeFinished = {
-                            fontSizeDraft?.let { onSettingsChange(settings.copy(fontSize = it)) }
-                            fontSizeDraft = null
-                        },
-                        valueRange = 10f..32f,
-                        steps = 21,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("A", style = MaterialTheme.typography.bodySmall)
-                        Text("A", style = MaterialTheme.typography.headlineSmall)
-                    }
-                }
+            SettingsItem(
+                "Reading theme",
+                settings.readingTheme.description,
+                Icons.AutoMirrored.Filled.MenuBook
+            ) {
+                ReadingThemePicker(
+                    selected = settings.readingTheme,
+                    appTheme = settings.theme,
+                    onSelect = { onEditSettings { s -> s.copy(readingTheme = it) } }
+                )
             }
+
+            // Size, face, spacing and light are set from the reader, where the page shows
+            // what each one does; only their whereabouts are noted here.
+            SettingsInfoItem(
+                "Text, spacing and light",
+                "Open a book and tap Aa",
+                Icons.Default.FormatSize
+            )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
@@ -89,14 +82,14 @@ fun SettingsScreen(
                 subtitle = "Prevent screen from sleeping while reading",
                 icon = Icons.Default.ScreenLockPortrait,
                 checked = settings.keepScreenOn
-            ) { onSettingsChange(settings.copy(keepScreenOn = it)) }
+            ) { onEditSettings { s -> s.copy(keepScreenOn = it) } }
 
             // EPUB only: the PDF renderer is a vertically scrolling page list.
             SettingsItem(
                 title = "EPUB Chapter Navigation",
                 subtitle = when (settings.readerScrollDirection) {
-                    ScrollDirection.VERTICAL -> "Vertical — scroll only, no swipe zones"
-                    ScrollDirection.HORIZONTAL -> "Horizontal — swipe the edges to change chapter"
+                    ScrollDirection.VERTICAL -> "Vertical — scroll only; tap the sides to turn the page"
+                    ScrollDirection.HORIZONTAL -> "Horizontal — swipe left or right to change chapter"
                 },
                 icon = when (settings.readerScrollDirection) {
                     ScrollDirection.VERTICAL -> Icons.Default.SwipeDown
@@ -107,7 +100,7 @@ fun SettingsScreen(
                     ScrollDirection.entries.forEach { dir ->
                         FilterChip(
                             selected = settings.readerScrollDirection == dir,
-                            onClick = { onSettingsChange(settings.copy(readerScrollDirection = dir)) },
+                            onClick = { onEditSettings { s -> s.copy(readerScrollDirection = dir) } },
                             label = {
                                 Text(
                                     if (dir == ScrollDirection.VERTICAL) "Vertical"
@@ -131,7 +124,7 @@ fun SettingsScreen(
             SettingsItem("Default Sort", settings.sortOption.displayName, Icons.AutoMirrored.Filled.Sort) {
                 SortSelector(
                     currentSort = settings.sortOption,
-                    onSortSelected = { onSettingsChange(settings.copy(sortOption = it)) }
+                    onSortSelected = { onEditSettings { s -> s.copy(sortOption = it) } }
                 )
             }
 
@@ -140,7 +133,7 @@ fun SettingsScreen(
                 subtitle = "Show books as a grid (toggle for list view)",
                 icon = Icons.Default.GridView,
                 checked = settings.isGridView,
-                onCheckedChange = { onSettingsChange(settings.copy(isGridView = it)) }
+                onCheckedChange = { onEditSettings { s -> s.copy(isGridView = it) } }
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -170,12 +163,11 @@ private fun SettingsSectionHeader(title: String, icon: ImageVector) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+        Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
         Text(
-            title,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.SemiBold
+            title.uppercase(),
+            style = Bindery.type.eyebrow,
+            color = MaterialTheme.colorScheme.primary
         )
     }
 }
@@ -308,7 +300,21 @@ private fun SortSelector(currentSort: SortOption, onSortSelected: (SortOption) -
 // Extension display names
 private val AppTheme.displayName get() = when (this) {
     AppTheme.SYSTEM -> "Auto"; AppTheme.LIGHT -> "Light"
-    AppTheme.DARK -> "Dark"; AppTheme.SEPIA -> "Sepia"
+    AppTheme.DARK -> "Dark"; AppTheme.BLACK -> "Black"
+}
+private val AppTheme.description get() = when (this) {
+    AppTheme.SYSTEM -> "Follows the system: light by day, dark at night"
+    AppTheme.LIGHT -> "Always light"
+    AppTheme.DARK -> "Always dark"
+    AppTheme.BLACK -> "Dark, on true black for OLED screens"
+}
+private val ReadingTheme.description get() = when (this) {
+    ReadingTheme.AUTO -> "Matches the app: light pages in light, dark pages in dark"
+    ReadingTheme.PAPER -> "$label — dark ink on warm white"
+    ReadingTheme.SEPIA -> "$label — brown ink on aged paper"
+    ReadingTheme.SLATE -> "$label — soft grey page for dim rooms"
+    ReadingTheme.NIGHT -> "$label — light ink on near-black"
+    ReadingTheme.BLACK -> "$label — dimmed ink on true black"
 }
 private val SortOption.displayName get() = when (this) {
     SortOption.TITLE -> "Title"; SortOption.AUTHOR -> "Author"

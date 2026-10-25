@@ -3,8 +3,6 @@ package com.ebookreader.presentation.reader.pdf
 import android.view.GestureDetector
 import android.view.MotionEvent
 import androidx.compose.animation.*
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,31 +23,31 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.recyclerview.widget.RecyclerView
-import com.ebookreader.domain.model.AppSettings
-import com.ebookreader.domain.model.AppTheme
 import com.ebookreader.domain.model.Bookmark
-import com.ebookreader.presentation.common.formatSessionTime
-import com.ebookreader.presentation.common.formatTotalReadingTime
+import com.ebookreader.domain.model.pageProgress
+import com.ebookreader.presentation.common.Bindery
+import com.ebookreader.presentation.common.BarEdge
+import com.ebookreader.presentation.common.BinderyCard
+import com.ebookreader.presentation.common.ReaderBar
+import com.ebookreader.presentation.common.ReaderProgressFooter
+import com.ebookreader.presentation.common.SessionClock
+import com.ebookreader.presentation.common.BinderySheet
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import com.rajat.pdfviewer.PdfRendererView
 import kotlinx.coroutines.delay
 import java.io.File
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PdfReaderScreen(
     bookId: Long,
-    settings: AppSettings,
     onNavigateBack: () -> Unit,
     viewModel: PdfReaderViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // AppTheme.SYSTEM must follow the device setting, not fall back to light.
-    val isDark = when (settings.theme) {
-        AppTheme.DARK -> true
-        AppTheme.SYSTEM -> isSystemInDarkTheme()
-        else -> false
-    }
+    // ReaderTheme has already put the reading palette in scope.
+    val pageColors = Bindery.colors
 
     var currentPage by remember { mutableIntStateOf(0) }
     var totalPages  by remember { mutableIntStateOf(0) }
@@ -145,7 +143,7 @@ fun PdfReaderScreen(
                 PdfViewerWidget(
                     file = File(book.filePath),
                     startPage = viewModel.startPage(),
-                    isDark = isDark,
+                    background = pageColors.paper,
                     pdfViewRef = pdfViewRef,
                     onTap = viewModel::toggleControls,
                     onPageChanged = { page, total ->
@@ -165,10 +163,7 @@ fun PdfReaderScreen(
                     exit  = fadeOut() + slideOutVertically(),
                     modifier = Modifier.align(Alignment.TopCenter)
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-                        shadowElevation = 4.dp
-                    ) {
+                    ReaderBar(BarEdge.Top) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -183,7 +178,6 @@ fun PdfReaderScreen(
                                 Text(
                                     book.title,
                                     style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis
                                 )
                                 Row(
@@ -196,11 +190,7 @@ fun PdfReaderScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                     if (sessionSeconds > 0) {
-                                        Text(
-                                            "⏱ ${formatSessionTime(sessionSeconds)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
+                                        SessionClock(sessionSeconds)
                                     }
                                 }
                             }
@@ -239,10 +229,7 @@ fun PdfReaderScreen(
                     exit  = fadeOut() + slideOutVertically { it },
                     modifier = Modifier.align(Alignment.BottomCenter)
                 ) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
-                        shadowElevation = 4.dp
-                    ) {
+                    ReaderBar(BarEdge.Bottom) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -284,31 +271,10 @@ fun PdfReaderScreen(
                                     )
                                 }
                             }
-                            val fraction = if (totalPages > 0)
-                                (currentPage + 1).toFloat() / totalPages else 0f
-                            LinearProgressIndicator(
-                                progress = { fraction },
-                                modifier = Modifier.fillMaxWidth()
+                            ReaderProgressFooter(
+                                progress = pageProgress(currentPage, totalPages),
+                                totalReadingSeconds = book.totalReadingSeconds,
                             )
-                            Spacer(Modifier.height(2.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    "${(fraction * 100).roundToInt()}% read",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                val totalFormatted = formatTotalReadingTime(book.totalReadingSeconds)
-                                if (totalFormatted.isNotEmpty()) {
-                                    Text(
-                                        "Total: $totalFormatted",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
                         }
                     }
                 }
@@ -342,10 +308,7 @@ fun PdfReaderScreen(
     }
 
     if (uiState.showBookmarksSheet) {
-        ModalBottomSheet(
-            onDismissRequest = viewModel::hideBookmarksSheet,
-            sheetState = rememberModalBottomSheetState()
-        ) {
+        BinderySheet(onDismissRequest = viewModel::hideBookmarksSheet) {
             BookmarksPanel(
                 bookmarks = uiState.bookmarks,
                 currentPage = currentPage,
@@ -365,7 +328,7 @@ fun PdfReaderScreen(
 private fun PdfViewerWidget(
     file: File,
     startPage: Int,
-    isDark: Boolean,
+    background: Color,
     pdfViewRef: MutableState<PdfRendererView?>,
     onTap: () -> Unit,
     onPageChanged: (page: Int, total: Int) -> Unit,
@@ -382,9 +345,6 @@ private fun PdfViewerWidget(
         factory = { ctx ->
             PdfRendererView(ctx).also { view ->
                 pdfViewRef.value = view
-
-                // Dark mode: tint the area around pages
-                if (isDark) view.setBackgroundColor(0xFF1C1B1F.toInt())
 
                 view.statusListener = object : PdfRendererView.StatusCallBack {
                     override fun onPageChanged(currentPage: Int, totalPage: Int) {
@@ -440,6 +400,10 @@ private fun PdfViewerWidget(
                 }
             }
         },
+        // The gutter around and between pages takes the reading surface colour. Set in
+        // update, not factory, so it follows a theme that changes while the book is open
+        // (Auto switching with the system, for one).
+        update = { view -> view.setBackgroundColor(background.toArgb()) },
         // Releases the PdfRenderer and its file descriptor; without this every book
         // opened leaked one until the process died.
         onRelease = { view -> runCatching { view.closePdfRender() } },
@@ -459,7 +423,6 @@ private fun BookmarksPanel(
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Text("Bookmarks",
             style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(bottom = 16.dp))
         if (bookmarks.isEmpty()) {
             Box(
@@ -480,15 +443,9 @@ private fun BookmarksPanel(
                 modifier = Modifier.heightIn(max = 400.dp)
             ) {
                 items(bookmarks, key = { it.id }) { bm ->
-                    Card(
+                    BinderyCard(
                         onClick = { onJumpToPage(bm.page) },
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (bm.page == currentPage)
-                                MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surface
-                        ),
-                        border = if (bm.page == currentPage)
-                            BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null
+                        selected = bm.page == currentPage
                     ) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Bookmark, null,

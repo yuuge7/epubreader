@@ -69,7 +69,7 @@ class StatsViewModel @Inject constructor(
                     )
                 }.sortedByDescending { it.durationSeconds }.take(5)
 
-            val monthStats = sessions.filter { it.timestamp.time >= startOfMonth }
+            val monthStats = sessions.filter { it.startedAt.time >= startOfMonth }
                 .groupBy { it.bookId }
                 .map { (id, bookSessions) ->
                     BookReadingStat(
@@ -83,7 +83,7 @@ class StatsViewModel @Inject constructor(
             val monthFormat = SimpleDateFormat("MMMM", Locale.getDefault())
             val history = sessions.groupBy { session ->
                 Calendar.getInstance().apply {
-                    time = session.timestamp
+                    time = session.startedAt
                     set(Calendar.DAY_OF_MONTH, 1)
                     set(Calendar.HOUR_OF_DAY, 0)
                     set(Calendar.MINUTE, 0)
@@ -103,7 +103,7 @@ class StatsViewModel @Inject constructor(
             // Yearly History
             val yearlyHistory = sessions.groupBy { session ->
                 Calendar.getInstance().apply {
-                    time = session.timestamp
+                    time = session.startedAt
                     set(Calendar.DAY_OF_YEAR, 1)
                     set(Calendar.HOUR_OF_DAY, 0)
                     set(Calendar.MINUTE, 0)
@@ -121,8 +121,8 @@ class StatsViewModel @Inject constructor(
 
             StatsUiState(
                 totalTimeSeconds = sessions.sumOf { it.durationSeconds },
-                monthlyTimeSeconds = sessions.filter { it.timestamp.time >= startOfMonth }.sumOf { it.durationSeconds },
-                yearlyTimeSeconds = sessions.filter { it.timestamp.time >= startOfYear }.sumOf { it.durationSeconds },
+                monthlyTimeSeconds = sessions.filter { it.startedAt.time >= startOfMonth }.sumOf { it.durationSeconds },
+                yearlyTimeSeconds = sessions.filter { it.startedAt.time >= startOfYear }.sumOf { it.durationSeconds },
                 topBooksAllTime = allTimeStats,
                 topBooksThisMonth = monthStats,
                 monthlyHistory = history,
