@@ -32,8 +32,8 @@ android {
         targetSdk = 36
         // versionCode must increase for every published build; versionName drives the
         // release tag and title (see .github/workflows/release.yml).
-        versionCode = 5
-        versionName = "1.6"
+        versionCode = 6
+        versionName = "2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

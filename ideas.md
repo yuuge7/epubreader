@@ -300,11 +300,6 @@ Drop card elevation. `CardDefaults.cardElevation(defaultElevation = 2.dp)`
 
 ### 3.3 PDF reader
 
-- **P1 — Text selection, search, and outline.** None of the three exist. The bundled
-  `io.github.afreakyelf:Pdf-Viewer` renders bitmaps only.
-- **P2 — Replace the viewer.** The current one needs a twelve-iteration, 400 ms retry loop just
-  to restore a page (`PdfReaderScreen.kt:83-93`). Moving to `android.graphics.pdf.PdfRenderer`
-  directly, or to AndroidX `pdf-viewer`, removes that hack and unlocks P1.
 - **P3 — Sub-page position.** PDF progress is page-granular; `scrollFraction` is unused for PDFs.
 - **P4 — Cover thumbnails for PDFs.** PDF books never get a cover — `readMetadata` is EPUB-only
   (`LibraryViewModel.kt:219`), so every PDF is a placeholder tile. Rendering page 1 once at import
@@ -348,18 +343,12 @@ Drop card elevation. `CardDefaults.cardElevation(defaultElevation = 2.dp)`
 - **F3** — OPDS catalogue browsing (Standard Ebooks, Project Gutenberg) as an import source.
 - **F4** — Duplicate detection by content hash, not file path. Today the same book imported under
   two filenames becomes two library entries (`LibraryViewModel.kt:246`).
-- **F5** — `ACTION_SEND` share target. The manifest handles `ACTION_VIEW` only
-  (`AndroidManifest.xml:33-58`), so "Share → EBook Reader" from a browser or mail client does
-  nothing.
 - **F6** — Dynamic app shortcuts for the last three books.
 - **F7** — Home-screen widget: continue reading, or the current streak.
 - **F8** — Quick Settings tile that opens the current book.
-- **F9** — Offline dictionary lookup, and on-device translation via ML Kit.
-- **F10** — Auto night switch at sunset.
 - **F11** — Reading reminders / streak notifications.
 - **F12** — Import metadata from filename patterns (`Author - Title (Year)`).
 - **F13** — Let the user set a cover from an image when the book has none.
-- **F14** — Read-aloud sleep timer.
 
 ---
 
@@ -482,12 +471,69 @@ R7–R10 (selection, highlights, search, quote cards), T1–T6 (stats with actua
 **Phase 6 — reach**
 R11 (TTS), F1 (formats), F3 (OPDS), T13 (sync), F7 (widget).
 
-Phases 1 to 6 are done. Left from the lists above: F2 (bulk import), F4 (duplicates by
-content hash), F5 (share target), F6/F8 (shortcuts, Quick Settings tile), F9 (dictionary),
-F10, F12 to F14, T10 to T12, and the TOC/NCX parsing issue in Gutenberg EPUBs (the NCX
-`<item>` with `media-type` before `href` is not found, so chapters fall back to "Chapter N").
-OPDS sign-in (Standard Ebooks is patrons-only) and highlight deletions in sync are not
-handled yet.
+Phases 1 to 6 are done.
 
 Tests (A7) and CI (A8) are not a phase; add them alongside whichever phase touches the code they
 would cover, starting with `EpubParser` in Phase 3.
+
+---
+
+## 9. Remaining
+
+Everything still planned, and nothing else. Items from the lists above that are neither done nor
+here were dropped.
+
+**Library**
+- **L3** — Cleaner top bar: search inline, everything else in one menu.
+- **L11** — Sort by progress, reading time or file size, with an ascending/descending toggle.
+- **L12** — Book detail screen: description, full metadata, replace the cover, file info.
+- **F2** — Import a whole folder at once.
+- **F4** — Spot duplicates by file content, not by file name.
+- **F12** — Read title and author from file names like `Author - Title (Year)`.
+- **F13** — Pick your own cover image for a book that has none.
+
+**Reader**
+- **R4** — Page-by-page mode (real pages instead of scrolling).
+- **R12** — Auto-scroll with a speed control.
+- **R13** — Reading settings saved per book.
+- **R16** — Nested table of contents.
+- **R17** — Table of contents for EPUB 3 books, plus the fix for Gutenberg books showing
+  "Chapter N" (the NCX `<item>` with `media-type` before `href` is not found). Both change
+  chapter indices that saved positions, bookmarks and highlights key on, so they need a
+  position migration first.
+- **R18** — Full-screen mode: system bars only show with the controls.
+- **R20** — "Keep screen on" only while reading (today it applies everywhere in the app).
+- **R21** — Two-column layout in landscape and on tablets.
+- **R22** — Several bookmarks per chapter, each showing a text excerpt.
+- **R23** — Reading ruler, or dimming the paragraphs around the one you're reading.
+
+**PDF**
+- **P3** — Save the position within a page, not just the page number.
+- **P5** — Grid of page thumbnails to jump around.
+- **P6** — Night mode (inverted pages).
+- **P7** — Crop margins.
+
+**Stats, settings and system**
+- **T7** — Timeline of finished books.
+- **T8** — CSV export.
+- **T10** — Split Settings into Reading / Library / Data / About.
+- **T11** — Storage screen showing space used, with a "clear cache" button.
+- **T12** — Full backup and restore: library, progress, bookmarks, highlights and settings in one
+  file.
+- **F8** — Quick Settings tile that opens the current book.
+- **F6** — App shortcuts for the last three books.
+
+**Under the hood**
+- **A1** — Settings save only the value that changed, not every key.
+- **A3, A4** — Faster book opening and import (no full parse just to read title and cover).
+- **A5** — Stats that stay fast with a long reading history.
+- **A7** — On-device UI tests.
+- **A9** — Shrink the release build (R8).
+- **A10** — Faster cold start (baseline profile).
+
+**Accessibility**
+- **X3** — Screen-reader labels that say each toggle's state (on/off).
+- **X4** — Every tap target at least 48 dp.
+- **X5** — Make sure the page's tap handler doesn't get in the way of links and screen readers.
+- **X6** — Proper headings in chapter text for screen readers.
+- **X8** — Honour the system's reduced-motion setting.
