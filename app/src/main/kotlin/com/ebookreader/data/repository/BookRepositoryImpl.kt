@@ -107,12 +107,14 @@ class BookRepositoryImpl @Inject constructor(
         bookId: Long,
         page: Int,
         totalPages: Int,
-        scrollFraction: Float
+        scrollFraction: Float,
+        progress: Float
     ) {
         bookDao.updateReadingPosition(
             bookId = bookId,
             page = page.coerceAtLeast(0),
             scrollFraction = scrollFraction.coerceIn(0f, 1f),
+            progress = progress.coerceIn(0f, 1f),
             lastPageIndex = (totalPages - 1).coerceAtLeast(0),
             timestamp = Date().time
         )

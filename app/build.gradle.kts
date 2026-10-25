@@ -145,5 +145,10 @@ dependencies {
     // RecyclerView (for PDF scrolling helper)
     implementation(libs.androidx.recyclerview)
 
+    // Serves the open book and the reading fonts to the EPUB WebView from one origin
+    implementation(libs.androidx.webkit)
+
     testImplementation(libs.junit)
+    testImplementation(libs.kxml2)
+    testImplementation(libs.org.json)
 }

@@ -21,6 +21,8 @@ data class BookStatsSnapshot(
     val totalPages: Int,
     val currentPage: Int,
     val scrollFraction: Float,
+    /** Share of the book read, 0..1. Absent from older files; see the decoder. */
+    val progress: Float,
     val readingStatus: String,
     val isFavorite: Boolean,
     val dateAdded: Long,

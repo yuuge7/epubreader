@@ -138,6 +138,7 @@ class StatsBackupManager @Inject constructor(
                         bookId = localId,
                         page = snapshot.currentPage.coerceAtLeast(0),
                         scrollFraction = snapshot.scrollFraction.coerceIn(0f, 1f),
+                        progress = snapshot.progress.coerceIn(0f, 1f),
                         status = snapshot.safeStatus(),
                         lastRead = snapshot.lastRead,
                         isFavorite = snapshot.isFavorite
@@ -161,6 +162,7 @@ class StatsBackupManager @Inject constructor(
         totalPages = totalPages,
         currentPage = currentPage,
         scrollFraction = scrollFraction,
+        progress = progress,
         readingStatus = readingStatus,
         isFavorite = isFavorite,
         dateAdded = dateAdded,

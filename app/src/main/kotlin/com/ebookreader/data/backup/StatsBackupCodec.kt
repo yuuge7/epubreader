@@ -3,6 +3,7 @@ package com.ebookreader.data.backup
 import com.ebookreader.domain.model.BookStatsSnapshot
 import com.ebookreader.domain.model.SessionSnapshot
 import com.ebookreader.domain.model.StatsBackup
+import com.ebookreader.domain.model.pageProgress
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -40,6 +41,7 @@ object StatsBackupCodec {
                     put("totalPages", book.totalPages)
                     put("currentPage", book.currentPage)
                     put("scrollFraction", book.scrollFraction.toDouble())
+                    put("progress", book.progress.toDouble())
                     put("readingStatus", book.readingStatus)
                     put("isFavorite", book.isFavorite)
                     put("dateAdded", book.dateAdded)
@@ -90,14 +92,24 @@ object StatsBackupCodec {
         }
 
         val books = root.optJSONArray("books").mapObjects { obj ->
+            val format = obj.optString("format", "EPUB")
+            val totalPages = obj.optInt("totalPages", 0)
+            val currentPage = obj.optInt("currentPage", 0)
+            val scrollFraction = obj.optDouble("scrollFraction", 0.0).toFloat()
+            val status = obj.optString("readingStatus", "NOT_STARTED")
             BookStatsSnapshot(
                 title = obj.optString("title"),
                 author = obj.optString("author"),
-                format = obj.optString("format", "EPUB"),
-                totalPages = obj.optInt("totalPages", 0),
-                currentPage = obj.optInt("currentPage", 0),
-                scrollFraction = obj.optDouble("scrollFraction", 0.0).toFloat(),
-                readingStatus = obj.optString("readingStatus", "NOT_STARTED"),
+                format = format,
+                totalPages = totalPages,
+                currentPage = currentPage,
+                scrollFraction = scrollFraction,
+                // Files written before progress was stored get the estimate the app
+                // showed at the time, the same one the v5 -> v6 migration seeds.
+                progress = obj.optDouble("progress", Double.NaN).toFloat()
+                    .takeUnless { it.isNaN() }
+                    ?: legacyProgress(format, status, currentPage, scrollFraction, totalPages),
+                readingStatus = status,
                 isFavorite = obj.optBoolean("isFavorite", false),
                 dateAdded = obj.optLong("dateAdded", 0L),
                 lastRead = if (obj.isNull("lastRead")) null else obj.optLong("lastRead"),
@@ -130,6 +142,19 @@ object StatsBackupCodec {
             books = books,
             sessions = sessions
         )
+    }
+
+    private fun legacyProgress(
+        format: String,
+        status: String,
+        page: Int,
+        scrollFraction: Float,
+        totalPages: Int,
+    ): Float = when {
+        status == "FINISHED" -> 1f
+        status == "NOT_STARTED" || totalPages <= 0 -> 0f
+        format == "PDF" -> pageProgress(page, totalPages)
+        else -> ((page + scrollFraction) / totalPages).coerceIn(0f, 1f)
     }
 
     private fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> {

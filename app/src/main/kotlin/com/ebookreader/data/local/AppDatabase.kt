@@ -11,7 +11,7 @@ import com.ebookreader.data.local.entity.ReadingSessionEntity
 
 @Database(
     entities = [BookEntity::class, BookmarkEntity::class, ReadingSessionEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

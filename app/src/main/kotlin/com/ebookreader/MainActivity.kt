@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
                             navController = navController,
                             startDestination = startDestination,
                             settings = uiState.settings,
-                            onSettingsChange = viewModel::updateSettings,
+                            onEditSettings = viewModel::editSettings,
                             pendingImportUri = uiState.pendingImportUri,
                             onPendingImportHandled = viewModel::consumePendingImport
                         )

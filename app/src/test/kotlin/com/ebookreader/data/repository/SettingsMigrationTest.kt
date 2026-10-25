@@ -3,6 +3,9 @@ package com.ebookreader.data.repository
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.preferencesOf
 import com.ebookreader.domain.model.AppTheme
+import com.ebookreader.domain.model.ReaderFont
+import com.ebookreader.domain.model.ReaderLight
+import com.ebookreader.domain.model.ReaderTypography
 import com.ebookreader.domain.model.ReadingTheme
 import com.ebookreader.domain.model.SortOption
 import org.junit.Assert.assertEquals
@@ -56,5 +59,60 @@ class SettingsMigrationTest {
         assertEquals(AppTheme.SYSTEM, s.theme)
         assertEquals(ReadingTheme.AUTO, s.readingTheme)
         assertEquals(SortOption.DATE_ADDED, s.sortOption)
+    }
+
+    @Test
+    fun `a font size chosen before the reader had its own sheet carries over`() {
+        val s = settingsFrom(preferencesOf(SettingsKeys.FONT_SIZE to 22f))
+        assertEquals(22f, s.typography.fontSize)
+        // Everything the old app never stored gets the new defaults.
+        assertEquals(ReaderTypography().copy(fontSize = 22f), s.typography)
+        assertEquals(ReaderLight(), s.readerLight)
+    }
+
+    @Test
+    fun `stored typography and light are read back`() {
+        val s = settingsFrom(
+            preferencesOf(
+                SettingsKeys.READER_FONT to "OPENDYSLEXIC",
+                SettingsKeys.FONT_SIZE to 20f,
+                SettingsKeys.LINE_HEIGHT to 1.9f,
+                SettingsKeys.PAGE_MARGIN to 8f,
+                SettingsKeys.TEXT_JUSTIFY to true,
+                SettingsKeys.HYPHENATE to true,
+                SettingsKeys.READER_BRIGHTNESS to 0.4f,
+                SettingsKeys.READER_WARMTH to 0.25f,
+            )
+        )
+        assertEquals(ReaderTypography(ReaderFont.OPENDYSLEXIC, 20f, 1.9f, 8f, justify = true, hyphenate = true), s.typography)
+        assertEquals(ReaderLight(brightness = 0.4f, warmth = 0.25f), s.readerLight)
+        assertEquals(false, s.readerLight.followsSystem)
+    }
+
+    @Test
+    fun `out of range reader values are clamped rather than kept`() {
+        val s = settingsFrom(
+            preferencesOf(
+                SettingsKeys.READER_FONT to "WINGDINGS",
+                SettingsKeys.FONT_SIZE to 400f,
+                SettingsKeys.LINE_HEIGHT to 0f,
+                SettingsKeys.PAGE_MARGIN to -10f,
+                SettingsKeys.READER_BRIGHTNESS to 7f,
+                SettingsKeys.READER_WARMTH to -1f,
+            )
+        )
+        assertEquals(ReaderTypography().font, s.typography.font)
+        assertEquals(ReaderTypography.FONT_SIZE_MAX, s.typography.fontSize)
+        assertEquals(ReaderTypography.LINE_HEIGHT_MIN, s.typography.lineHeight)
+        assertEquals(ReaderTypography.MARGIN_MIN, s.typography.margin)
+        assertEquals(1f, s.readerLight.brightness)
+        assertEquals(0f, s.readerLight.warmth)
+    }
+
+    @Test
+    fun `any negative brightness means the system's`() {
+        val s = settingsFrom(preferencesOf(SettingsKeys.READER_BRIGHTNESS to -0.5f))
+        assertEquals(true, s.readerLight.followsSystem)
+        assertEquals(ReaderLight.SYSTEM, s.readerLight.brightness)
     }
 }

@@ -7,6 +7,7 @@ import com.ebookreader.domain.model.Book
 import com.ebookreader.domain.model.Bookmark
 import com.ebookreader.domain.model.ReadingSessionTracker
 import com.ebookreader.domain.model.ReadingStatus
+import com.ebookreader.domain.model.pageProgress
 import com.ebookreader.domain.repository.BookRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -118,7 +119,9 @@ class PdfReaderViewModel @Inject constructor(
         if (!userInteracted && page != pageToRestore) return
         currentPage = page
         viewModelScope.launch {
-            bookRepository.updateReadingProgress(bookId, page, totalPages)
+            bookRepository.updateReadingProgress(
+                bookId, page, totalPages, progress = pageProgress(page, totalPages)
+            )
             checkPageBookmarked(page)
         }
         if (totalPages > 0 && page >= totalPages - 1 && !_uiState.value.isFinished) {
@@ -247,7 +250,9 @@ class PdfReaderViewModel @Inject constructor(
         if (bookId <= 0L || !positionRestored) return
         val page = currentPage
         val total = currentTotalPages
-        appScope.launch { bookRepository.updateReadingProgress(bookId, page, total) }
+        appScope.launch {
+            bookRepository.updateReadingProgress(bookId, page, total, progress = pageProgress(page, total))
+        }
     }
 
     override fun onCleared() {

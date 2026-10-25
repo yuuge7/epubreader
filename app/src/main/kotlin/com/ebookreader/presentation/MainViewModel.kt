@@ -41,10 +41,8 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    fun updateSettings(settings: AppSettings) {
-        viewModelScope.launch {
-            settingsRepository.updateSettings(settings)
-        }
+    fun editSettings(transform: (AppSettings) -> AppSettings) {
+        viewModelScope.launch { settingsRepository.editSettings(transform) }
     }
 
     fun onFileOpenedFromOutside(uri: Uri) =
