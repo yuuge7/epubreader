@@ -25,6 +25,9 @@ data class BookEntity(
      */
     @ColumnInfo(defaultValue = "0")
     val scrollFraction: Float = 0f,
+    /** Share of the book read, 0..1. See [Book.progress]. */
+    @ColumnInfo(defaultValue = "0")
+    val progress: Float = 0f,
     val isFavorite: Boolean = false,
     val readingStatus: String = ReadingStatus.NOT_STARTED.name,
     val dateAdded: Long = Date().time,
@@ -36,7 +39,7 @@ data class BookEntity(
         id = id, title = title, author = author,
         filePath = filePath, format = BookFormat.valueOf(format),
         coverPath = coverPath, totalPages = totalPages, currentPage = currentPage,
-        scrollFraction = scrollFraction,
+        scrollFraction = scrollFraction, progress = progress,
         isFavorite = isFavorite, readingStatus = ReadingStatus.valueOf(readingStatus),
         dateAdded = Date(dateAdded), lastRead = lastRead?.let { Date(it) },
         fileSize = fileSize, totalReadingSeconds = totalReadingSeconds
@@ -48,6 +51,7 @@ data class BookEntity(
             filePath = book.filePath, format = book.format.name,
             coverPath = book.coverPath, totalPages = book.totalPages,
             currentPage = book.currentPage, scrollFraction = book.scrollFraction,
+            progress = book.progress,
             isFavorite = book.isFavorite,
             readingStatus = book.readingStatus.name, dateAdded = book.dateAdded.time,
             lastRead = book.lastRead?.time, fileSize = book.fileSize,

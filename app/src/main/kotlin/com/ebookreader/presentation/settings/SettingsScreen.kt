@@ -12,7 +12,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.ebookreader.BuildConfig
 import com.ebookreader.domain.model.*
 import com.ebookreader.presentation.common.Bindery
@@ -23,7 +22,7 @@ import com.ebookreader.presentation.common.label
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
-    onSettingsChange: (AppSettings) -> Unit,
+    onEditSettings: ((AppSettings) -> AppSettings) -> Unit,
     onNavigateBack: () -> Unit,
 ) {
     Scaffold(
@@ -50,7 +49,7 @@ fun SettingsScreen(
             SettingsItem("App theme", settings.theme.description, Icons.Default.DarkMode) {
                 ThemeSelector(
                     currentTheme = settings.theme
-                ) { onSettingsChange(settings.copy(theme = it)) }
+                ) { onEditSettings { s -> s.copy(theme = it) } }
             }
 
             SettingsItem(
@@ -61,38 +60,17 @@ fun SettingsScreen(
                 ReadingThemePicker(
                     selected = settings.readingTheme,
                     appTheme = settings.theme,
-                    onSelect = { onSettingsChange(settings.copy(readingTheme = it)) }
+                    onSelect = { onEditSettings { s -> s.copy(readingTheme = it) } }
                 )
             }
 
-            // Track the drag locally. Writing on every onValueChange put a DataStore write
-            // and a full settings re-emission on each frame of the gesture, which in turn
-            // re-rendered the open EPUB chapter; only the value the user settles on is saved.
-            var fontSizeDraft by remember { mutableStateOf<Float?>(null) }
-            val shownFontSize = fontSizeDraft ?: settings.fontSize
-
-            SettingsItem("Font Size", "${shownFontSize.toInt()}sp", Icons.Default.FormatSize) {
-                Column {
-                    Slider(
-                        value = shownFontSize,
-                        onValueChange = { fontSizeDraft = it },
-                        onValueChangeFinished = {
-                            fontSizeDraft?.let { onSettingsChange(settings.copy(fontSize = it)) }
-                            fontSizeDraft = null
-                        },
-                        valueRange = 10f..32f,
-                        steps = 21,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("A", style = MaterialTheme.typography.bodySmall)
-                        Text("A", style = MaterialTheme.typography.bodyLarge.copy(fontSize = 24.sp))
-                    }
-                }
-            }
+            // Size, face, spacing and light are set from the reader, where the page shows
+            // what each one does; only their whereabouts are noted here.
+            SettingsInfoItem(
+                "Text, spacing and light",
+                "Open a book and tap Aa",
+                Icons.Default.FormatSize
+            )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
@@ -104,14 +82,14 @@ fun SettingsScreen(
                 subtitle = "Prevent screen from sleeping while reading",
                 icon = Icons.Default.ScreenLockPortrait,
                 checked = settings.keepScreenOn
-            ) { onSettingsChange(settings.copy(keepScreenOn = it)) }
+            ) { onEditSettings { s -> s.copy(keepScreenOn = it) } }
 
             // EPUB only: the PDF renderer is a vertically scrolling page list.
             SettingsItem(
                 title = "EPUB Chapter Navigation",
                 subtitle = when (settings.readerScrollDirection) {
-                    ScrollDirection.VERTICAL -> "Vertical — scroll only, no swipe zones"
-                    ScrollDirection.HORIZONTAL -> "Horizontal — swipe the edges to change chapter"
+                    ScrollDirection.VERTICAL -> "Vertical — scroll only; tap the sides to turn the page"
+                    ScrollDirection.HORIZONTAL -> "Horizontal — swipe left or right to change chapter"
                 },
                 icon = when (settings.readerScrollDirection) {
                     ScrollDirection.VERTICAL -> Icons.Default.SwipeDown
@@ -122,7 +100,7 @@ fun SettingsScreen(
                     ScrollDirection.entries.forEach { dir ->
                         FilterChip(
                             selected = settings.readerScrollDirection == dir,
-                            onClick = { onSettingsChange(settings.copy(readerScrollDirection = dir)) },
+                            onClick = { onEditSettings { s -> s.copy(readerScrollDirection = dir) } },
                             label = {
                                 Text(
                                     if (dir == ScrollDirection.VERTICAL) "Vertical"
@@ -146,7 +124,7 @@ fun SettingsScreen(
             SettingsItem("Default Sort", settings.sortOption.displayName, Icons.AutoMirrored.Filled.Sort) {
                 SortSelector(
                     currentSort = settings.sortOption,
-                    onSortSelected = { onSettingsChange(settings.copy(sortOption = it)) }
+                    onSortSelected = { onEditSettings { s -> s.copy(sortOption = it) } }
                 )
             }
 
@@ -155,7 +133,7 @@ fun SettingsScreen(
                 subtitle = "Show books as a grid (toggle for list view)",
                 icon = Icons.Default.GridView,
                 checked = settings.isGridView,
-                onCheckedChange = { onSettingsChange(settings.copy(isGridView = it)) }
+                onCheckedChange = { onEditSettings { s -> s.copy(isGridView = it) } }
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))

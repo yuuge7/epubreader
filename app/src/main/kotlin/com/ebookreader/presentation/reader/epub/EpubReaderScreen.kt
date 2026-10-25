@@ -1,12 +1,14 @@
 package com.ebookreader.presentation.reader.epub
 
-import android.annotation.SuppressLint
-import android.webkit.WebResourceRequest
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.compose.animation.*
+import android.provider.Settings
+import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,50 +20,50 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.ebookreader.presentation.common.Bindery
-import com.ebookreader.presentation.common.BinderyColors
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.webkit.WebViewAssetLoader
+import com.ebookreader.domain.model.AppSettings
+import com.ebookreader.domain.model.Bookmark
+import com.ebookreader.domain.model.EpubChapter
+import com.ebookreader.domain.model.ReaderLight
+import com.ebookreader.domain.model.ReaderTypography
+import com.ebookreader.domain.model.ScrollDirection
 import com.ebookreader.presentation.common.BarEdge
+import com.ebookreader.presentation.common.Bindery
 import com.ebookreader.presentation.common.BinderyCard
 import com.ebookreader.presentation.common.ReaderBar
 import com.ebookreader.presentation.common.ReaderProgressFooter
 import com.ebookreader.presentation.common.SessionClock
-import com.ebookreader.presentation.common.toCssHex
-import androidx.compose.ui.graphics.toArgb
+import com.ebookreader.presentation.common.BinderySheet
 import kotlinx.coroutines.delay
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.ebookreader.domain.model.AppSettings
-import com.ebookreader.domain.model.Bookmark
-import com.ebookreader.domain.model.EpubChapter
-import com.ebookreader.domain.model.ScrollDirection
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EpubReaderScreen(
     bookId: Long,
     settings: AppSettings,
+    onEditSettings: ((AppSettings) -> AppSettings) -> Unit,
     onNavigateBack: () -> Unit,
     viewModel: EpubReaderViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // ReaderTheme has already put the reading palette in scope, so the page and the
-    // chrome around it are always the same theme.
-    val pageColors = Bindery.colors
-    val isHorizontal = settings.readerScrollDirection == ScrollDirection.HORIZONTAL
 
-    LaunchedEffect(bookId) { viewModel.loadBook(bookId, settings.fontSize) }
-    LaunchedEffect(settings.fontSize, uiState.isLoading) {
-        if (!uiState.isLoading) viewModel.updateFontSize(settings.fontSize)
-    }
+    LaunchedEffect(bookId) { viewModel.loadBook(bookId) }
 
     // Session reading timer — the ViewModel owns the clock so it stops while backgrounded.
     var sessionSeconds by remember { mutableLongStateOf(0L) }
@@ -86,6 +88,22 @@ fun EpubReaderScreen(
             viewModel.onScreenPaused()
         }
     }
+
+    // Changes show from here at once and are saved behind them: a slider is saved when
+    // it is let go, a tap straight away. Each draft is dropped once the saved settings
+    // have caught up with it, and until then the next change builds on the draft, so
+    // quick taps on A+ are not each worked out from the same stale size.
+    var typographyDraft by remember { mutableStateOf<ReaderTypography?>(null) }
+    var lightDraft by remember { mutableStateOf<ReaderLight?>(null) }
+    LaunchedEffect(settings.typography) {
+        if (typographyDraft == settings.typography) typographyDraft = null
+    }
+    LaunchedEffect(settings.readerLight) {
+        if (lightDraft == settings.readerLight) lightDraft = null
+    }
+    val typography = typographyDraft ?: settings.typography
+    val light = lightDraft ?: settings.readerLight
+    ReaderBrightness(light)
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -118,209 +136,79 @@ fun EpubReaderScreen(
             }
 
             else -> {
-                // WebView — takes full size
-                EpubWebView(
-                    html = uiState.currentChapterHtml,
-                    baseUrl = uiState.currentChapterBaseUrl,
-                    pendingAnchor = uiState.pendingScrollAnchor,
-                    restoreFraction = uiState.pendingRestoreFraction,
-                    pageColors = pageColors,
-                    onTap = viewModel::toggleControls,
-                    onScrollProgress = viewModel::updateScrollProgress,
-                    onInternalLink = { path, fragment ->
-                        viewModel.navigateToInternalLink(path, fragment)
-                    },
-                    onAnchorConsumed = viewModel::clearPendingAnchor,
-                    onRestoreConsumed = viewModel::clearPendingRestore,
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // ── Horizontal swipe edge zones ──────────────────────────
-                // Only in horizontal mode. Left/right 18% of screen are swipe
-                // zones; the middle 64% stays fully interactive for the WebView.
-                if (isHorizontal) {
-                    // Left zone → previous chapter
-                    SwipeEdgeZone(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(0.18f)
-                            .align(Alignment.CenterStart),
-                        icon = Icons.Default.ChevronLeft,
-                        iconAlignment = Alignment.CenterStart,
-                        enabled = uiState.currentChapterIndex > 0,
-                        onSwipeTriggered = viewModel::previousChapter
-                    )
-                    // Right zone → next chapter
-                    SwipeEdgeZone(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(0.18f)
-                            .align(Alignment.CenterEnd),
-                        icon = Icons.Default.ChevronRight,
-                        iconAlignment = Alignment.CenterEnd,
-                        enabled = (uiState.currentChapterIndex < (uiState.totalChapters - 1)),
-                        onSwipeTriggered = viewModel::nextChapter
+                val bookDir = uiState.bookDir
+                if (bookDir != null) {
+                    ReaderPages(
+                        state = uiState,
+                        viewModel = viewModel,
+                        bookDir = bookDir,
+                        typography = typography,
+                        swipe = settings.readerScrollDirection == ScrollDirection.HORIZONTAL,
+                        // The pages stop at the system bars, which show the page colour
+                        // behind them, so text never runs under the clock or the handle.
+                        modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars),
                     )
                 }
 
                 // ── Top bar ──────────────────────────────────────────────
                 AnimatedVisibility(
                     visible = uiState.showControls,
-                    enter = fadeIn() + slideInVertically(),
-                    exit = fadeOut() + slideOutVertically(),
+                    enter = fadeIn(tween(ControlsFadeMs)),
+                    exit = fadeOut(tween(ControlsFadeMs)),
                     modifier = Modifier.align(Alignment.TopCenter)
                 ) {
-                    ReaderBar(BarEdge.Top) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .windowInsetsPadding(WindowInsets.statusBars)
-                                .padding(horizontal = 4.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            IconButton(onClick = onNavigateBack) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                            }
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    uiState.bookTitle,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis
-                                )
-                                uiState.chapters.getOrNull(uiState.currentChapterIndex)?.let {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            it.title,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f, fill = false)
-                                        )
-                                        if (sessionSeconds > 0) {
-                                            SessionClock(sessionSeconds)
-                                        }
-                                    }
-                                }
-                            }
-                            IconButton(
-                                onClick = {
-                                    if (uiState.isCurrentChapterBookmarked)
-                                        viewModel.removeBookmarkFromChapter(uiState.currentChapterIndex)
-                                    else viewModel.showBookmarkDialog()
-                                }
-                            ) {
-                                Icon(
-                                    if (uiState.isCurrentChapterBookmarked) Icons.Default.Bookmark
-                                    else Icons.Default.BookmarkBorder,
-                                    "Bookmark",
-                                    tint = if (uiState.isCurrentChapterBookmarked)
-                                        MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                            IconButton(onClick = viewModel::showBookmarksSheet) {
-                                Icon(Icons.Default.Bookmarks, "Bookmarks")
-                            }
-                            IconButton(onClick = viewModel::showTocSheet) {
-                                Icon(Icons.Default.TableRows, "Contents")
-                            }
-                            IconButton(onClick = { viewModel.markAsFinished() }) {
-                                val finishedTint =
-                                    if (uiState.isFinished)
-                                        MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurface
-                                Icon(
-                                    Icons.Default.CheckCircle,
-                                    contentDescription = "Mark as Finished",
-                                    tint = finishedTint
-                                )
-                            }
-                        }
-                    }
+                    ReaderTopBar(
+                        state = uiState,
+                        sessionSeconds = sessionSeconds,
+                        onNavigateBack = onNavigateBack,
+                        viewModel = viewModel,
+                    )
                 }
 
                 // ── Bottom bar ───────────────────────────────────────────
                 AnimatedVisibility(
                     visible = uiState.showControls,
-                    enter = fadeIn() + slideInVertically { it },
-                    exit = fadeOut() + slideOutVertically { it },
+                    enter = fadeIn(tween(ControlsFadeMs)),
+                    exit = fadeOut(tween(ControlsFadeMs)),
                     modifier = Modifier.align(Alignment.BottomCenter)
                 ) {
-                    ReaderBar(BarEdge.Bottom) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .windowInsetsPadding(WindowInsets.navigationBars)
-                                .padding(horizontal = 16.dp, vertical = 8.dp)
-                        ) {
-                            // Chapter scrubber slider
-                            if (uiState.totalChapters > 1) {
-                                // Track the drag locally: loading a chapter on every pixel
-                                // of slider movement re-renders the whole WebView.
-                                var scrubTarget by remember { mutableStateOf<Float?>(null) }
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    IconButton(
-                                        onClick = viewModel::previousChapter,
-                                        enabled = uiState.currentChapterIndex > 0,
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.ChevronLeft, "Previous",
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                    Text(
-                                        ((scrubTarget?.toInt() ?: uiState.currentChapterIndex) + 1)
-                                            .toString(),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        modifier = Modifier.widthIn(min = 20.dp)
-                                    )
-                                    Slider(
-                                        value = scrubTarget ?: uiState.currentChapterIndex.toFloat(),
-                                        onValueChange = { v -> scrubTarget = v },
-                                        onValueChangeFinished = {
-                                            scrubTarget?.let { viewModel.navigateToChapter(it.toInt()) }
-                                            scrubTarget = null
-                                        },
-                                        valueRange = 0f..(uiState.totalChapters - 1)
-                                            .toFloat().coerceAtLeast(0f),
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Text(
-                                        uiState.totalChapters.toString(),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        modifier = Modifier.widthIn(min = 20.dp)
-                                    )
-                                    IconButton(
-                                        onClick = viewModel::nextChapter,
-                                        enabled = (uiState.currentChapterIndex < (uiState.totalChapters - 1)),
-                                        modifier = Modifier.size(36.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.ChevronRight, "Next",
-                                            modifier = Modifier.size(20.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            ReaderProgressFooter(
-                                progress = uiState.overallReadingProgress,
-                                totalReadingSeconds = uiState.totalReadingSeconds,
-                            )
-                        }
-                    }
+                    ReaderBottomBar(state = uiState, viewModel = viewModel)
                 }
             }
+        }
+
+        // Over everything the reader draws, bars included, like a filter on the screen.
+        if (light.warmth > 0f) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(WarmthTint.copy(alpha = light.warmth * MaxWarmthAlpha))
+            )
         }
     }
 
     // ── Dialogs / Sheets ─────────────────────────────────────────────────────
+
+    if (uiState.showReadingSheet) {
+        ReadingSheet(
+            typography = typography,
+            light = light,
+            readingTheme = settings.readingTheme,
+            appTheme = settings.theme,
+            onTypographyChange = { t ->
+                typographyDraft = t
+                onEditSettings { it.copy(typography = t) }
+            },
+            onLightChange = { lightDraft = it },
+            // Saves the draft rather than a value passed in: a slider's last change and
+            // its finish can arrive with no recomposition in between.
+            onLightCommit = {
+                lightDraft?.let { l -> onEditSettings { it.copy(readerLight = l) } }
+            },
+            onReadingThemeChange = { theme -> onEditSettings { it.copy(readingTheme = theme) } },
+            onDismiss = viewModel::hideReadingSheet,
+        )
+    }
 
     if (uiState.showBookmarkDialog) {
         AlertDialog(
@@ -344,9 +232,9 @@ fun EpubReaderScreen(
     }
 
     if (uiState.showTocSheet) {
-        ModalBottomSheet(
+        BinderySheet(
             onDismissRequest = viewModel::hideTocSheet,
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
             TableOfContentsPanel(
                 chapters = uiState.chapters,
@@ -357,9 +245,9 @@ fun EpubReaderScreen(
     }
 
     if (uiState.showBookmarksSheet) {
-        ModalBottomSheet(
+        BinderySheet(
             onDismissRequest = viewModel::hideBookmarksSheet,
-            sheetState = rememberModalBottomSheetState()
+            sheetState = rememberModalBottomSheetState(),
         ) {
             EpubBookmarksPanel(
                 bookmarks = uiState.bookmarks,
@@ -374,283 +262,276 @@ fun EpubReaderScreen(
     }
 }
 
-// ── Swipe edge zone ───────────────────────────────────────────────────────────
+/** Controls appear and go in a short fade; sliding them would only move the text's frame. */
+private const val ControlsFadeMs = 120
+
+/** Candlelight, roughly 1900 K. */
+private val WarmthTint = Color(0xFFFF9329)
+/** Strong enough to take the blue out of a white page, not so strong text loses contrast. */
+private const val MaxWarmthAlpha = 0.3f
+
+// ── Pages ─────────────────────────────────────────────────────────────────────
+
+/**
+ * The open chapter and, once it has loaded, its neighbours either side, each in its own
+ * WebView. Turning into a neighbour shows a page that is already laid out instead of
+ * reloading the WebView, which is what made every chapter change flash.
+ */
+@Composable
+private fun ReaderPages(
+    state: EpubReaderUiState,
+    viewModel: EpubReaderViewModel,
+    bookDir: String,
+    typography: ReaderTypography,
+    swipe: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val colors = Bindery.colors
+    val assets: WebViewAssetLoader = remember(bookDir) {
+        ReaderOrigin.assetLoader(context.applicationContext, File(bookDir))
+    }
+    val style = PageStyle(typography, PageColors.of(colors), LocalDensity.current.fontScale)
+    val css = remember(style) { readerCss(style) }
+    val reducedMotion = remember {
+        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+    }
+    val config = PageConfig(swipe = swipe, smooth = !reducedMotion, language = state.language)
+    val events = remember(viewModel) {
+        object : PageEvents {
+            override fun onTap(zone: Int) = viewModel.onPageTap(zone)
+            override fun onEdge(direction: Int) = viewModel.onChapterEdge(direction)
+            override fun onSwipe(direction: Int) = viewModel.onSwipe(direction)
+            override fun onScroll(fraction: Float) = viewModel.updateScrollProgress(fraction)
+            override fun onInternalLink(path: String, fragment: String?) =
+                viewModel.navigateToInternalLink(path, fragment)
+            override fun onPositionApplied(requestId: Long) {
+                viewModel.onPositionApplied(requestId)
+            }
+        }
+    }
+
+    val current = state.currentChapterIndex
+    // The neighbours wait for the open chapter, so they never compete with it for the
+    // renderer while it is the one being looked at.
+    val loaded = remember { mutableStateSetOf<Int>() }
+    val window = if (current in loaded) {
+        (current - 1..current + 1).filter { it in 0 until state.totalChapters }
+    } else listOf(current)
+
+    Box(modifier.fillMaxSize()) {
+        window.forEach { index ->
+            key(index) {
+                val document = remember { viewModel.chapterDocument(index) }
+                if (document != null) {
+                    DisposableEffect(Unit) { onDispose { loaded.remove(index) } }
+                    val active = index == current
+                    ChapterPage(
+                        document = document,
+                        active = active,
+                        css = css,
+                        config = config,
+                        position = state.positionRequest.takeIf { active },
+                        assets = assets,
+                        paper = colors.paper,
+                        events = events,
+                        onReady = {
+                            loaded += index
+                            viewModel.onPageReady(index)
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .zIndex(if (active) 1f else 0f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Brightness while the reader is open; the system's own setting again once it closes. */
+@Composable
+private fun ReaderBrightness(light: ReaderLight) {
+    val window = LocalActivity.current?.window ?: return
+    // Applied on each change, but reset only when the reader closes: resetting between
+    // two values of a slider drag would flash the screen to the system level.
+    LaunchedEffect(window, light.brightness) {
+        window.attributes = window.attributes.apply {
+            screenBrightness = if (light.followsSystem) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            else light.brightness
+        }
+    }
+    DisposableEffect(window) {
+        onDispose {
+            window.attributes = window.attributes.apply {
+                screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            }
+        }
+    }
+}
+
+// ── Bars ──────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun SwipeEdgeZone(
-    modifier: Modifier,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    iconAlignment: Alignment,
-    enabled: Boolean,
-    onSwipeTriggered: () -> Unit
+private fun ReaderTopBar(
+    state: EpubReaderUiState,
+    sessionSeconds: Long,
+    onNavigateBack: () -> Unit,
+    viewModel: EpubReaderViewModel,
 ) {
-    var dragAccumulated by remember { mutableFloatStateOf(0f) }
-    var triggered by remember { mutableStateOf(value = false) }
-
-    Box(
-        modifier = modifier
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
-                detectHorizontalDragGestures(
-                    onDragStart = { dragAccumulated = 0f; triggered = false },
-                    onDragEnd = { dragAccumulated = 0f; triggered = false }
-                ) { change, delta ->
-                    change.consume()
-                    dragAccumulated += delta
-                    if (!triggered && kotlin.math.abs(dragAccumulated) > 80f) {
-                        triggered = true
-                        onSwipeTriggered()
+    ReaderBar(BarEdge.Top) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onNavigateBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    state.bookTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                state.chapters.getOrNull(state.currentChapterIndex)?.let {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            it.title,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (sessionSeconds > 0) {
+                            SessionClock(sessionSeconds)
+                        }
                     }
                 }
-            },
-        contentAlignment = iconAlignment
-    ) {
-        if (enabled) {
-            Icon(
-                icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.20f),
-                modifier = Modifier
-                    .padding(horizontal = 4.dp)
-                    .size(28.dp)
+            }
+            // Type and page settings, in the reader where their effect can be seen.
+            IconButton(
+                onClick = viewModel::showReadingSheet,
+                modifier = Modifier.semantics { contentDescription = "Text and page" }
+            ) {
+                Text("Aa", style = Bindery.type.bookTitle.copy(fontSize = 18.sp))
+            }
+            IconButton(onClick = viewModel::showTocSheet) {
+                Icon(Icons.Default.TableRows, "Contents")
+            }
+            IconButton(
+                onClick = {
+                    if (state.isCurrentChapterBookmarked)
+                        viewModel.removeBookmarkFromChapter(state.currentChapterIndex)
+                    else viewModel.showBookmarkDialog()
+                }
+            ) {
+                Icon(
+                    if (state.isCurrentChapterBookmarked) Icons.Default.Bookmark
+                    else Icons.Default.BookmarkBorder,
+                    if (state.isCurrentChapterBookmarked) "Remove bookmark" else "Add bookmark",
+                    tint = if (state.isCurrentChapterBookmarked)
+                        MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurface
+                )
+            }
+            ReaderOverflowMenu(state, viewModel)
+        }
+    }
+}
+
+@Composable
+private fun ReaderOverflowMenu(state: EpubReaderUiState, viewModel: EpubReaderViewModel) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }) {
+            Icon(Icons.Default.MoreVert, "More")
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Bookmarks") },
+                leadingIcon = { Icon(Icons.Default.Bookmarks, null) },
+                onClick = { open = false; viewModel.showBookmarksSheet() },
+            )
+            DropdownMenuItem(
+                text = { Text(if (state.isFinished) "Finished" else "Mark as finished") },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.CheckCircle, null,
+                        tint = if (state.isFinished) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                enabled = !state.isFinished,
+                onClick = { open = false; viewModel.markAsFinished() },
             )
         }
     }
 }
 
-// ── WebView ───────────────────────────────────────────────────────────────────
-
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun EpubWebView(
-    html: String,
-    baseUrl: String,
-    pendingAnchor: String?,
-    restoreFraction: Float?,
-    pageColors: BinderyColors,
-    onTap: () -> Unit,
-    onScrollProgress: (Float) -> Unit,
-    onInternalLink: (path: String, fragment: String?) -> Unit,
-    onAnchorConsumed: () -> Unit,
-    onRestoreConsumed: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // Whole chapters run to hundreds of KB, so the themed copy is built once per chapter
-    // and palette rather than on every recomposition.
-    val documentHtml = remember(html, pageColors) { themeChapter(html, pageColors) }
-    val resolvedBaseUrl = baseUrl.ifBlank { "file:///android_asset/" }
-
-    val webViewRef = remember { mutableStateOf<WebView?>(null) }
-    // What is currently displayed. Reloading is destructive (it throws away the scroll
-    // position), so it may only happen when the document genuinely changed — not on
-    // every recomposition, which is what scroll callbacks cause.
-    val loadedDocument = remember { mutableStateOf<Pair<String, String>?>(null) }
-
-    val latestOnTap by rememberUpdatedState(onTap)
-    val latestOnScrollProgress by rememberUpdatedState(onScrollProgress)
-    val latestOnInternalLink by rememberUpdatedState(onInternalLink)
-
-    // Applied by the LaunchedEffect below, once the document has finished loading.
-    val pendingAnchorState = rememberUpdatedState(pendingAnchor)
-    val pendingRestoreState = rememberUpdatedState(restoreFraction)
-    val latestOnAnchorConsumed by rememberUpdatedState(onAnchorConsumed)
-    val latestOnRestoreConsumed by rememberUpdatedState(onRestoreConsumed)
-    val documentReady = remember { mutableStateOf(false) }
-
-    fun scrollToAnchorJs(anchor: String) = """
-        (function(){
-            var el = document.getElementById('$anchor')
-                    || document.querySelector('[name="$anchor"]');
-            if(el){ el.scrollIntoView(true); }
-        })();
-    """.trimIndent()
-
-    // onPageFinished fires before images and web fonts have finished loading, so the
-    // document is still short and a single scrollTo lands earlier than intended. Worse,
-    // that early position used to be reported straight back and saved, so every reopen
-    // drifted further back. Suppress reporting while restoring and keep re-applying the
-    // fraction until the height stops changing.
-    fun scrollToFractionJs(fraction: Float) = """
-        (function(){
-            var target = $fraction;
-            window._restoring = true;
-            var lastHeight = -1, stableTicks = 0, totalTicks = 0;
-
-            function finish(){ window._restoring = false; }
-
-            function apply(){
-                if (!window._restoring) return;
-                var height = document.body.scrollHeight;
-                var max = Math.max(height - window.innerHeight, 0);
-                window.scrollTo(0, max * target);
-                if (height === lastHeight) { stableTicks++; } else { lastHeight = height; stableTicks = 0; }
-                totalTicks++;
-                if (stableTicks < 3 && totalTicks < 40) { setTimeout(apply, 100); } else { finish(); }
+private fun ReaderBottomBar(state: EpubReaderUiState, viewModel: EpubReaderViewModel) {
+    ReaderBar(BarEdge.Bottom) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+            // Chapter scrubber slider
+            if (state.totalChapters > 1) {
+                // Track the drag locally: loading a chapter on every pixel of slider
+                // movement would load a page per pixel.
+                var scrubTarget by remember { mutableStateOf<Float?>(null) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = viewModel::previousChapter,
+                        enabled = state.currentChapterIndex > 0,
+                    ) {
+                        Icon(Icons.Default.ChevronLeft, "Previous chapter")
+                    }
+                    Text(
+                        ((scrubTarget?.toInt() ?: state.currentChapterIndex) + 1).toString(),
+                        style = Bindery.type.numeralSmall,
+                        modifier = Modifier.widthIn(min = 24.dp)
+                    )
+                    Slider(
+                        value = scrubTarget ?: state.currentChapterIndex.toFloat(),
+                        onValueChange = { v -> scrubTarget = v },
+                        onValueChangeFinished = {
+                            scrubTarget?.let { viewModel.navigateToChapter(it.toInt()) }
+                            scrubTarget = null
+                        },
+                        valueRange = 0f..(state.totalChapters - 1).toFloat().coerceAtLeast(0f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 4.dp)
+                    )
+                    Text(
+                        state.totalChapters.toString(),
+                        style = Bindery.type.numeralSmall,
+                        modifier = Modifier.widthIn(min = 24.dp)
+                    )
+                    IconButton(
+                        onClick = viewModel::nextChapter,
+                        enabled = state.currentChapterIndex < state.totalChapters - 1,
+                    ) {
+                        Icon(Icons.Default.ChevronRight, "Next chapter")
+                    }
+                }
             }
-
-            // Any deliberate touch wins over the restore.
-            document.addEventListener('touchstart', finish, { passive: true, once: true });
-            window.addEventListener('load', apply);
-            apply();
-        })();
-    """.trimIndent()
-
-    // Restore/anchor jumps must wait for layout, otherwise they scroll a document that
-    // has no height yet and silently do nothing.
-    LaunchedEffect(documentReady.value, pendingAnchor, restoreFraction) {
-        if (!documentReady.value) return@LaunchedEffect
-        val wv = webViewRef.value ?: return@LaunchedEffect
-        val anchor = pendingAnchorState.value
-        val fraction = pendingRestoreState.value
-        when {
-            anchor != null -> {
-                wv.evaluateJavascript(scrollToAnchorJs(anchor), null)
-                latestOnAnchorConsumed()
-            }
-            fraction != null && fraction > 0f -> {
-                wv.evaluateJavascript(scrollToFractionJs(fraction), null)
-                latestOnRestoreConsumed()
-            }
+            ReaderProgressFooter(
+                progress = state.overallReadingProgress,
+                totalReadingSeconds = state.totalReadingSeconds,
+                modifier = Modifier.padding(horizontal = 4.dp)
+            )
         }
     }
-
-    AndroidView(
-        factory = { context ->
-            WebView(context).also { wv ->
-                webViewRef.value = wv
-                wv.settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    // Needed to load the book's own images, fonts and stylesheets out of
-                    // the extraction directory.
-                    allowFileAccess = true
-                    allowContentAccess = true
-                    applyUntrustedContentPolicy()
-                    setSupportZoom(true)
-                    builtInZoomControls = true
-                    displayZoomControls = false
-                    // Lay chapters out at the screen's width. The wide viewport made the
-                    // WebView render a ~980px desktop page and zoom it out, so the chosen
-                    // font size came out at a fraction of its size on a phone.
-                    useWideViewPort = false
-                }
-                wv.webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(
-                        view: WebView, request: WebResourceRequest
-                    ): Boolean {
-                        val url = request.url
-                        return when (url.scheme) {
-                            "file" -> {
-                                latestOnInternalLink(url.path ?: return false, url.fragment)
-                                true
-                            }
-                            "http", "https" -> true
-                            else -> false
-                        }
-                    }
-
-                    override fun onPageFinished(view: WebView, url: String) {
-                        // Inject tap + scroll listeners AFTER page is fully loaded.
-                        // Named window properties so re-injection replaces old listeners
-                        // instead of stacking a second one (which made every tap fire
-                        // twice and cancel itself out).
-                        view.evaluateJavascript("""
-                            (function(){
-                                if(window._tapHandler){
-                                    document.removeEventListener('click', window._tapHandler);
-                                }
-                                window._tapHandler = function(e){ Android.tap(); };
-                                document.addEventListener('click', window._tapHandler);
-
-                                if(window._scrollHandler){
-                                    window.removeEventListener('scroll', window._scrollHandler);
-                                }
-                                window._lastReported = -1;
-                                window._restoring = false;
-                                window._scrollHandler = function(){
-                                    // While restoring, the document is still growing as
-                                    // images load. Reporting those positions would
-                                    // overwrite the saved one with a too-early value.
-                                    if(window._restoring) return;
-                                    var max = Math.max(
-                                        document.body.scrollHeight - window.innerHeight, 1);
-                                    var f = Math.min(window.scrollY / max, 1.0);
-                                    // Throttle: a raw scroll stream re-renders the whole
-                                    // screen dozens of times a second.
-                                    if(Math.abs(f - window._lastReported) < 0.002) return;
-                                    window._lastReported = f;
-                                    Android.scrollProgress(f);
-                                };
-                                window.addEventListener('scroll', window._scrollHandler);
-                            })();
-                        """.trimIndent(), null)
-                        documentReady.value = true
-                    }
-                }
-                wv.addJavascriptInterface(object : Any() {
-                    @android.webkit.JavascriptInterface
-                    fun tap() = latestOnTap()
-                    @android.webkit.JavascriptInterface
-                    fun scrollProgress(fraction: Float) = latestOnScrollProgress(fraction)
-                }, "Android")
-            }
-        },
-        update = { wv ->
-            webViewRef.value = wv
-            // Paint the view itself in the page colour, so the gap while a chapter loads
-            // is the page and not a white flash.
-            wv.setBackgroundColor(pageColors.paper.toArgb())
-            val document = resolvedBaseUrl to documentHtml
-            if (loadedDocument.value != document) {
-                loadedDocument.value = document
-                documentReady.value = false
-                wv.loadDataWithBaseURL(
-                    resolvedBaseUrl, documentHtml, "text/html", "UTF-8", null
-                )
-            }
-        },
-        onRelease = { wv ->
-            wv.stopLoading()
-            wv.destroy()
-        },
-        modifier = modifier
-    )
-}
-
-/** The chapter as parsed, recoloured for the reading theme (the parser emits the tag). */
-private fun themeChapter(html: String, page: BinderyColors): String {
-    val bg = page.paper.toCssHex()
-    val fg = page.ink.toCssHex()
-    val link = page.bookcloth.toCssHex()
-    val themed = html.replace(
-        """<style id="epub-reader-base">""",
-        """<style id="epub-reader-base">html,body{background-color:$bg!important;color:$fg!important;}a,a:visited{color:$link!important;}"""
-    )
-    // Bottom padding so the last lines are never hidden by the floating bottom bar.
-    return themed + """
-        <style>body { padding-bottom: 110px !important; }</style>
-    """.trimIndent()
-}
-
-/**
- * Locks down the settings that matter when the document is a book rather than a page the
- * app authored. An EPUB is untrusted HTML running with JavaScript enabled and a
- * JavascriptInterface attached, so:
- *
- *  - it must not be able to fetch other `file://` URLs, which would let a malicious book
- *    read the rest of the library and hand it to a script;
- *  - it must not reach the network at all. The app is offline by design, and a remote
- *    image or beacon in a chapter would otherwise report back what is being read, and when.
- *
- * The two file-URL flags already default to false at this minSdk; they are set explicitly
- * so the intent survives someone loosening the settings above.
- */
-@Suppress("DEPRECATION")
-private fun android.webkit.WebSettings.applyUntrustedContentPolicy() {
-    allowFileAccessFromFileURLs = false
-    allowUniversalAccessFromFileURLs = false
-    blockNetworkLoads = true
-    blockNetworkImage = true
 }
 
 // ── TOC ───────────────────────────────────────────────────────────────────────

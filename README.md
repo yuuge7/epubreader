@@ -16,7 +16,19 @@ An offline-first Android reader for EPUB and PDF books, with a library manager, 
 - Resumes exactly where you stopped — chapter *and* scroll offset within it
 - Reading themes chosen apart from the app theme: Paper, Sepia, Slate, Night and Black pages,
   or Auto to follow the app; the reader's bars and sheets take the page's colours
-- Adjustable font size
+- An **Aa** sheet inside the EPUB reader for size, typeface, line spacing, margins,
+  justification, hyphenation, page colour, brightness and warmth, each applied to the page
+  as it changes, without reloading it or losing your place
+- Six reading faces, all bundled: Literata (default), Bitter, Atkinson Hyperlegible,
+  OpenDyslexic, Inter Tight, or the book's own fonts. Text size follows the system font scale
+- Dark pages that stay dark: a book's own text colours, white boxes and inline styles are
+  overridden, and figures are dimmed so they do not glare
+- Tap the left or right third of the page to turn it, the middle to show the controls; in
+  horizontal mode, swipe to change chapter. Turning past either end of a chapter opens the
+  next one, or the previous one at its end
+- The chapters either side of the open one are kept loaded, so turning into them is instant
+- Progress is weighted by how much text each chapter holds, so title pages and short
+  chapters no longer skew the percentage
 - Table of contents, internal link navigation and chapter scrubbing for EPUB
 - Pinch-to-zoom and page scrubbing for PDF
 - Bookmarks with optional notes
@@ -93,7 +105,7 @@ app/src/main/kotlin/com/ebookreader/
 │   └── repository/    Repository interfaces
 ├── presentation/
 │   ├── library/       Library, import, book options
-│   ├── reader/epub/   WebView-based EPUB reader
+│   ├── reader/epub/   WebView-based EPUB reader: pages, page script, reader stylesheet, Aa sheet
 │   ├── reader/pdf/    PdfRendererView-based PDF reader
 │   ├── settings/      Settings
 │   ├── stats/         Statistics and history
@@ -113,7 +125,7 @@ Architecture is MVVM over a repository layer: Compose screens observe a `StateFl
 | Persistence | Room (books, bookmarks, sessions), DataStore (settings) |
 | Images | Coil |
 | PDF rendering | [Pdf-Viewer](https://github.com/afreakyelf/Pdf-Viewer) |
-| EPUB rendering | WebView with a custom parser |
+| EPUB rendering | WebView with a custom parser; book and fonts served through AndroidX WebKit's `WebViewAssetLoader` |
 | Dependencies | Gradle version catalog (`gradle/libs.versions.toml`) |
 
 ## Database migrations
@@ -202,6 +214,10 @@ Paste the contents of `keystore.b64` into `KEYSTORE_BASE64`, then delete the fil
 
 Good places to start: R8/minification rules for release builds, horizontal paged EPUB layout, per-book font and theme overrides, EPUB text search, cover extraction for PDFs.
 
+Unit tests run on the JVM with `./gradlew testDebugUnitTest`, and on every pull request. The
+EPUB parser tests build real EPUB files on the fly and parse them with kXML, the pull parser
+Android itself uses.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
@@ -213,3 +229,10 @@ Bundled fonts are under the SIL Open Font License 1.1; their licence texts ship 
   weights 400–700 to keep the APK small
 - [Inter Tight](https://github.com/rsms/inter) — trimmed the same way
 - [IBM Plex Mono](https://github.com/IBM/plex) Medium — unmodified, as its licence reserves the name
+- [Bitter](https://github.com/solmatas/BitterPro) — trimmed the same way; the reserved name is
+  "Bitter Pro", which is not used
+- [Atkinson Hyperlegible](https://www.brailleinstitute.org/freefont/) — unmodified
+- [OpenDyslexic](https://opendyslexic.org) — unmodified, as its licence reserves the name
+
+Literata's italic, used only by the reader, is also fixed at a text optical size to halve its
+weight; Charis SIL was left out because its reserved name rules out trimming its 3 MB.

@@ -82,6 +82,32 @@ object DatabaseModule {
         }
     }
 
+    /**
+     * v5 -> v6
+     *  - books.progress: the share of the book read, stored rather than derived. EPUB
+     *    progress is now weighted by how much text each chapter holds, which the
+     *    library cannot work out from a chapter index.
+     *
+     * Existing rows are seeded with the estimate the app showed until now, so no book's
+     * progress jumps on upgrade; the reader replaces it with the weighted figure the next
+     * time the book is opened.
+     */
+    private val MIGRATION_5_6 = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE `books` ADD COLUMN `progress` REAL NOT NULL DEFAULT 0")
+            db.execSQL(
+                """
+                UPDATE `books` SET `progress` = CASE
+                    WHEN `readingStatus` = 'FINISHED' THEN 1.0
+                    WHEN `readingStatus` = 'NOT_STARTED' OR `totalPages` <= 0 THEN 0.0
+                    WHEN `format` = 'PDF' THEN MIN(1.0, (`currentPage` + 1) * 1.0 / `totalPages`)
+                    ELSE MIN(1.0, (`currentPage` + `scrollFraction`) / `totalPages`)
+                END
+                """.trimIndent()
+            )
+        }
+    }
+
     /** Reads the fragments, asks [planSittingMerge] what to do, applies it. */
     private fun mergeFragmentedSittings(db: SupportSQLiteDatabase) {
         val rows = mutableListOf<SittingSpan>()
@@ -126,7 +152,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "ebook_reader_db"
         )
-            .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
             // Only the pre-release schemas (1, 2) may be thrown away. Everything from v3 on
             // must migrate: a destructive fallback here deletes the user's whole library,
             // reading progress, bookmarks and stats on an app update.

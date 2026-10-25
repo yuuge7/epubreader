@@ -55,6 +55,7 @@ interface BookDao {
         UPDATE books
         SET currentPage = :page,
             scrollFraction = :scrollFraction,
+            progress = :progress,
             lastRead = :timestamp,
             readingStatus = CASE
                 WHEN readingStatus = 'FINISHED' AND :page >= :lastPageIndex THEN 'FINISHED'
@@ -67,6 +68,7 @@ interface BookDao {
         bookId: Long,
         page: Int,
         scrollFraction: Float,
+        progress: Float,
         lastPageIndex: Int,
         timestamp: Long
     )
@@ -74,7 +76,7 @@ interface BookDao {
     @Query(
         """
         UPDATE books
-        SET currentPage = :page, scrollFraction = 1.0, lastRead = :timestamp,
+        SET currentPage = :page, scrollFraction = 1.0, progress = 1.0, lastRead = :timestamp,
             readingStatus = 'FINISHED'
         WHERE id = :bookId
         """
@@ -84,7 +86,7 @@ interface BookDao {
     @Query(
         """
         UPDATE books
-        SET currentPage = 0, scrollFraction = 0, lastRead = NULL,
+        SET currentPage = 0, scrollFraction = 0, progress = 0, lastRead = NULL,
             readingStatus = 'NOT_STARTED'
         WHERE id = :bookId
         """
@@ -116,7 +118,7 @@ interface BookDao {
     @Query(
         """
         UPDATE books
-        SET currentPage = :page, scrollFraction = :scrollFraction,
+        SET currentPage = :page, scrollFraction = :scrollFraction, progress = :progress,
             readingStatus = :status, lastRead = :lastRead, isFavorite = :isFavorite
         WHERE id = :bookId
         """
@@ -125,6 +127,7 @@ interface BookDao {
         bookId: Long,
         page: Int,
         scrollFraction: Float,
+        progress: Float,
         status: String,
         lastRead: Long?,
         isFavorite: Boolean

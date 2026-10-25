@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import com.ebookreader.domain.model.Book
 import com.ebookreader.domain.model.BookFormat
 import com.ebookreader.domain.model.ReadingStatus
+import com.ebookreader.presentation.common.BinderySheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -26,10 +27,7 @@ fun BookOptionsSheet(
     onDelete: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState()
-    ) {
+    BinderySheet(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

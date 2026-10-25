@@ -37,7 +37,7 @@ import kotlin.math.roundToInt
 @Composable
 fun LibraryScreen(
     settings: AppSettings,
-    onSettingsChange: (AppSettings) -> Unit,
+    onEditSettings: ((AppSettings) -> AppSettings) -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToStats: () -> Unit,
     onOpenBook: (Book) -> Unit,
@@ -95,7 +95,7 @@ fun LibraryScreen(
                         }
                         IconButton(
                             onClick = {
-                                onSettingsChange(settings.copy(isGridView = !settings.isGridView))
+                                onEditSettings { s -> s.copy(isGridView = !s.isGridView) }
                             }
                         ) {
                             Icon(

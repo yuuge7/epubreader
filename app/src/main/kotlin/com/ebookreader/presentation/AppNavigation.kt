@@ -26,7 +26,7 @@ fun AppNavigation(
     navController: NavHostController,
     startDestination: String,
     settings: AppSettings,
-    onSettingsChange: (AppSettings) -> Unit,
+    onEditSettings: ((AppSettings) -> AppSettings) -> Unit,
     pendingImportUri: Uri? = null,
     onPendingImportHandled: () -> Unit = {}
 ) {
@@ -71,7 +71,7 @@ fun AppNavigation(
         composable(Screen.Library.route) {
             LibraryScreen(
                 settings = settings,
-                onSettingsChange = onSettingsChange,
+                onEditSettings = onEditSettings,
                 onNavigateToSettings = { navController.navigate(Screen.Settings.route) },
                 onNavigateToStats = { navController.navigate(Screen.Stats.route) },
                 pendingImportUri = pendingImportUri,
@@ -108,6 +108,7 @@ fun AppNavigation(
                 EpubReaderScreen(
                     bookId = bookId,
                     settings = settings,
+                    onEditSettings = onEditSettings,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -116,7 +117,7 @@ fun AppNavigation(
         composable(Screen.Settings.route) {
             SettingsScreen(
                 settings = settings,
-                onSettingsChange = onSettingsChange,
+                onEditSettings = onEditSettings,
                 onNavigateBack = { navController.popBackStack() }
             )
         }

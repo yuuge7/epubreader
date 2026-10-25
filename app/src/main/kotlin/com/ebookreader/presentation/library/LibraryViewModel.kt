@@ -89,10 +89,7 @@ class LibraryViewModel @Inject constructor(
     }
 
     private fun persistSettings(transform: (AppSettings) -> AppSettings) {
-        viewModelScope.launch {
-            val current = settingsRepository.getSettings().first()
-            settingsRepository.updateSettings(transform(current))
-        }
+        viewModelScope.launch { settingsRepository.editSettings(transform) }
     }
 
     fun setSearchQuery(query: String) {

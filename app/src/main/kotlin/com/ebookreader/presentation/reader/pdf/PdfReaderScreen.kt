@@ -24,12 +24,14 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.recyclerview.widget.RecyclerView
 import com.ebookreader.domain.model.Bookmark
+import com.ebookreader.domain.model.pageProgress
 import com.ebookreader.presentation.common.Bindery
 import com.ebookreader.presentation.common.BarEdge
 import com.ebookreader.presentation.common.BinderyCard
 import com.ebookreader.presentation.common.ReaderBar
 import com.ebookreader.presentation.common.ReaderProgressFooter
 import com.ebookreader.presentation.common.SessionClock
+import com.ebookreader.presentation.common.BinderySheet
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.rajat.pdfviewer.PdfRendererView
@@ -269,10 +271,8 @@ fun PdfReaderScreen(
                                     )
                                 }
                             }
-                            val fraction = if (totalPages > 0)
-                                (currentPage + 1).toFloat() / totalPages else 0f
                             ReaderProgressFooter(
-                                progress = fraction,
+                                progress = pageProgress(currentPage, totalPages),
                                 totalReadingSeconds = book.totalReadingSeconds,
                             )
                         }
@@ -308,10 +308,7 @@ fun PdfReaderScreen(
     }
 
     if (uiState.showBookmarksSheet) {
-        ModalBottomSheet(
-            onDismissRequest = viewModel::hideBookmarksSheet,
-            sheetState = rememberModalBottomSheetState()
-        ) {
+        BinderySheet(onDismissRequest = viewModel::hideBookmarksSheet) {
             BookmarksPanel(
                 bookmarks = uiState.bookmarks,
                 currentPage = currentPage,
