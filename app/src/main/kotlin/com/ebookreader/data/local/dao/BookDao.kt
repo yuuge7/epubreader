@@ -24,15 +24,6 @@ interface BookDao {
     @Query("SELECT * FROM books WHERE readingStatus = :status ORDER BY lastRead DESC")
     fun getBooksByStatus(status: String): Flow<List<BookEntity>>
 
-    @Query("SELECT * FROM books ORDER BY title ASC")
-    fun getAllBooksSortedByTitle(): Flow<List<BookEntity>>
-
-    @Query("SELECT * FROM books ORDER BY author ASC")
-    fun getAllBooksSortedByAuthor(): Flow<List<BookEntity>>
-
-    @Query("SELECT * FROM books ORDER BY CASE WHEN lastRead IS NULL THEN 1 ELSE 0 END, lastRead DESC")
-    fun getAllBooksSortedByLastRead(): Flow<List<BookEntity>>
-
     @Query("SELECT * FROM books WHERE title LIKE '%' || :query || '%' OR author LIKE '%' || :query || '%'")
     fun searchBooks(query: String): Flow<List<BookEntity>>
 
@@ -79,7 +70,9 @@ interface BookDao {
         """
         UPDATE books
         SET currentPage = :page, scrollFraction = 1.0, progress = 1.0, lastRead = :timestamp,
-            readingStatus = 'FINISHED'
+            readingStatus = 'FINISHED',
+            finishedAt = CASE WHEN readingStatus = 'FINISHED' AND finishedAt IS NOT NULL
+                THEN finishedAt ELSE :timestamp END
         WHERE id = :bookId
         """
     )
@@ -89,7 +82,7 @@ interface BookDao {
         """
         UPDATE books
         SET currentPage = 0, scrollFraction = 0, progress = 0, lastRead = NULL,
-            readingStatus = 'NOT_STARTED'
+            readingStatus = 'NOT_STARTED', finishedAt = NULL
         WHERE id = :bookId
         """
     )
@@ -122,7 +115,12 @@ interface BookDao {
         UPDATE books
         SET currentPage = :page, scrollFraction = :scrollFraction, progress = :progress,
             readingStatus = :status, lastRead = :lastRead, isFavorite = :isFavorite,
-            positionLabel = :positionLabel
+            positionLabel = :positionLabel,
+            finishedAt = CASE
+                WHEN :status = 'FINISHED' THEN COALESCE(finishedAt, :lastRead)
+                WHEN :status = 'NOT_STARTED' THEN NULL
+                ELSE finishedAt
+            END
         WHERE id = :bookId
         """
     )
@@ -181,4 +179,50 @@ interface BookDao {
         """
     )
     fun getBooksInCollection(collectionId: Long): Flow<List<BookEntity>>
+    // ── v8 ───────────────────────────────────────────────────────────────────
+
+    @Query("SELECT * FROM books WHERE format = 'EPUB' AND chapterLayout < :layout")
+    suspend fun getEpubsWithLayoutBefore(layout: Int): List<BookEntity>
+
+    /** Moves a book to another chapter numbering; its place is given in the new one. */
+    @Query(
+        """
+        UPDATE books SET chapterLayout = :layout, currentPage = :page, chapterWeights = NULL,
+            textIndexed = 0
+        WHERE id = :bookId
+        """
+    )
+    suspend fun setChapterLayout(bookId: Long, layout: Int, page: Int)
+
+    @Query("SELECT * FROM books WHERE contentHash = :hash LIMIT 1")
+    suspend fun getBookByContentHash(hash: String): BookEntity?
+
+    @Query("SELECT * FROM books WHERE contentHash IS NULL AND sourceFormat IS NULL")
+    suspend fun getBooksWithoutHash(): List<BookEntity>
+
+    @Query("UPDATE books SET contentHash = :hash WHERE id = :bookId")
+    suspend fun updateContentHash(bookId: Long, hash: String)
+
+    @Query("UPDATE books SET description = :description WHERE id = :bookId")
+    suspend fun updateDescription(bookId: Long, description: String?)
+
+    @Query("SELECT * FROM books WHERE format = 'EPUB' AND description IS NULL")
+    suspend fun getEpubsWithoutDescription(): List<BookEntity>
+
+    @Query("UPDATE books SET readingSettings = :json WHERE id = :bookId")
+    suspend fun updateReadingSettings(bookId: Long, json: String?)
+
+    @Query("UPDATE books SET title = :title, author = :author WHERE id = :bookId")
+    suspend fun updateTitleAndAuthor(bookId: Long, title: String, author: String)
+
+    /** Finished books, the most recently finished first: the timeline. */
+    @Query("SELECT * FROM books WHERE finishedAt IS NOT NULL ORDER BY finishedAt DESC")
+    fun getFinishedBooks(): Flow<List<BookEntity>>
+
+    @Query("SELECT * FROM books WHERE id = :id")
+    fun observeBook(id: Long): Flow<BookEntity?>
+
+    /** The books read most recently, for the launcher's shortcuts and the tile. */
+    @Query("SELECT * FROM books WHERE lastRead IS NOT NULL ORDER BY lastRead DESC LIMIT :limit")
+    suspend fun getRecentlyRead(limit: Int): List<BookEntity>
 }

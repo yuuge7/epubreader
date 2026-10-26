@@ -27,6 +27,8 @@ data class HighlightSnapshot(
     val note: String,
     val color: String,
     val createdAt: Long,
+    /** The chapter numbering [chapterIndex] is in; null in files from before it changed. */
+    val chapterLayout: Int? = null,
 )
 
 data class BookStatsSnapshot(
@@ -45,6 +47,8 @@ data class BookStatsSnapshot(
     val totalReadingSeconds: Long,
     /** "Chapter 4", "Page 12 of 40": absent from older files. */
     val positionLabel: String? = null,
+    /** The chapter numbering [currentPage] is in; null in files from before it changed. */
+    val chapterLayout: Int? = null,
 )
 
 data class SessionSnapshot(

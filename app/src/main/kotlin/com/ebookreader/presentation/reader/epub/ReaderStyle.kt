@@ -64,6 +64,16 @@ private const val TOP_CLEARANCE = 16f
 /** Clear of the reader's bottom bar when it is shown over the end of a chapter. */
 private const val END_CLEARANCE = 96f
 
+/** In the stylesheet of a paged chapter, and only there; the page script looks for it. */
+internal const val PAGED_MARKER = "--reader-paged:1"
+
+/** A page's top and bottom margins in paged mode, where nothing scrolls under a bar. */
+private const val PAGED_TOP = 24f
+private const val PAGED_BOTTOM = 36f
+
+/** The least room between two columns side by side, however narrow the margins are set. */
+private const val MIN_COLUMN_GAP = 32f
+
 /**
  * The stylesheet the reader lays over every chapter.
  *
@@ -133,7 +143,42 @@ internal fun readerCss(style: PageStyle): String {
         if (c.imageBrightness < 1f) {
             append("img,svg image,video{filter:brightness(${num(c.imageBrightness)});}\n")
         }
+        // The accent the page script draws its reading ruler in.
+        append(":root{--reader-accent:${c.link};--reader-ruler:${c.searchMark.ifEmpty { c.selection }};}\n")
+        // Reading focus: everything but the paragraph at the reading line steps back.
+        append("html.__dim body :is(p,li,h1,h2,h3,h4,h5,h6,dd,dt,pre,figcaption,td,th)")
+        append("{opacity:.3;transition:opacity .25s;}\n")
+        append("html.__dim body .__focus{opacity:1!important;}\n")
+        append("html.__still *{transition:none!important;}\n")
+        if (t.paged) append(pagedCss(t))
     }
+}
+
+/**
+ * Paged mode: the chapter is laid out in columns exactly one screen wide (two, side by
+ * side, on a wide screen), which the page script turns through sideways. The page script
+ * tells the modes apart by --reader-paged.
+ */
+private fun pagedCss(t: ReaderTypography): String = buildString {
+    val m = t.margin
+    append(":root{$PAGED_MARKER;}\n")
+    append("html{height:100%!important;margin:0!important;padding:0!important;overflow:hidden!important;}\n")
+    append("body{box-sizing:border-box!important;width:100vw!important;height:100vh!important;")
+    append("max-width:none!important;min-height:0!important;")
+    append("padding:${px(PAGED_TOP)} ${px(m)} ${px(PAGED_BOTTOM)} ${px(m)}!important;")
+    append("column-count:1!important;column-gap:${px(2 * m)}!important;column-fill:auto!important;}\n")
+    if (t.twoColumns) {
+        val gap = maxOf(2 * m, MIN_COLUMN_GAP)
+        // Landscape on a phone, or any screen wide enough for two comfortable lines.
+        append("@media (min-width:840px),(min-aspect-ratio:5/4) and (min-width:560px){")
+        append("body{column-count:2!important;column-gap:${px(gap)}!important;")
+        append("padding-left:${px(gap / 2)}!important;padding-right:${px(gap / 2)}!important;}}\n")
+    }
+    // A figure never runs off the bottom of its page, and is not split across two.
+    append("img,svg,video{max-height:calc(100vh - ${px(PAGED_TOP + PAGED_BOTTOM + 8)})!important;")
+    append("object-fit:contain;break-inside:avoid;}\n")
+    append("h1,h2,h3,h4,h5,h6{break-after:avoid;}\n")
+    append("p{orphans:2;widows:2;}\n")
 }
 
 /** The chapter with the reader's stylesheet as the last word in its head. */

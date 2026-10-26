@@ -115,4 +115,31 @@ class SettingsMigrationTest {
         assertEquals(true, s.readerLight.followsSystem)
         assertEquals(ReaderLight.SYSTEM, s.readerLight.brightness)
     }
+
+    @Test
+    fun `an edit touches only the keys that changed`() {
+        val prefs = androidx.datastore.preferences.core.mutablePreferencesOf(
+            SettingsKeys.SYNC_FOLDER to "content://tree/books",
+        )
+        prefs.applyChanges(settingsFrom(prefs))
+        val written = prefs.asMap().toMap()
+
+        val changed = settingsFrom(prefs).copy(sortOption = SortOption.PROGRESS, syncFolder = null)
+        prefs.applyChanges(changed)
+        val after = prefs.asMap()
+
+        assertEquals("PROGRESS", after[SettingsKeys.SORT_OPTION])
+        // The folder setting is gone rather than written empty.
+        assertEquals(false, after.containsKey(SettingsKeys.SYNC_FOLDER))
+        // Everything else is as it was.
+        written.forEach { (key, value) ->
+            if (key != SettingsKeys.SORT_OPTION && key != SettingsKeys.SYNC_FOLDER) assertEquals(value, after[key])
+        }
+    }
+
+    @Test
+    fun `a library sorted before the direction existed keeps its order`() {
+        assertEquals(false, settingsFrom(preferencesOf(SettingsKeys.SORT_OPTION to "TITLE")).sortDescending)
+        assertEquals(true, settingsFrom(preferencesOf(SettingsKeys.SORT_OPTION to "LAST_READ")).sortDescending)
+    }
 }

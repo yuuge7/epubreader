@@ -39,4 +39,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindBookTextSearch(impl: BookTextSearchImpl): BookTextSearch
+
+    @Binds
+    @Singleton
+    abstract fun bindReadingHistory(impl: com.ebookreader.data.repository.ReadingHistoryImpl): com.ebookreader.domain.repository.ReadingHistory
 }

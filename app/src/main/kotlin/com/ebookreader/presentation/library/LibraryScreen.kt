@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
@@ -55,6 +56,7 @@ fun LibraryScreen(
     onOpenBook: (Book) -> Unit,
     onOpenBookAt: (book: Book, chapterIndex: Int, query: String) -> Unit,
     onOpenBookStats: (Book) -> Unit,
+    onOpenBookDetails: (Book) -> Unit,
     pendingImportUri: Uri? = null,
     onPendingImportHandled: () -> Unit = {},
     viewModel: LibraryViewModel = hiltViewModel(),
@@ -66,6 +68,9 @@ fun LibraryScreen(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri: Uri? -> uri?.let { viewModel.importBook(it) } }
     val launchImport = { filePicker.launch(SourceKind.pickerMimeTypes) }
+    val folderPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree(),
+    ) { uri: Uri? -> uri?.let { viewModel.importFolder(it) } }
 
     // A file handed to us by another app ("Open with"): import it, then open it.
     LaunchedEffect(pendingImportUri) {
@@ -132,17 +137,18 @@ fun LibraryScreen(
                         { bookForOptions = uiState.books.firstOrNull { it.id in uiState.selection } }
                     } else null,
                 )
-                uiState.isSearchActive -> SearchBar(
+                else -> LibraryTopBar(
+                    searching = uiState.isSearchActive,
                     query = uiState.searchQuery,
                     onQueryChange = viewModel::setSearchQuery,
-                    onClose = viewModel::toggleSearch
-                )
-                else -> LibraryTopBar(
+                    onSearch = viewModel::toggleSearch,
                     isGridView = settings.isGridView,
                     selectedSort = uiState.selectedSort,
-                    onSearch = viewModel::toggleSearch,
+                    sortDescending = uiState.sortDescending,
                     onSort = viewModel::setSort,
+                    onReverseSort = viewModel::toggleSortDirection,
                     onToggleView = { onEditSettings { s -> s.copy(isGridView = !s.isGridView) } },
+                    onImportFolder = { folderPicker.launch(null) },
                     onStats = onNavigateToStats,
                     onCatalog = onNavigateToCatalog,
                     onSettings = onNavigateToSettings,
@@ -183,6 +189,14 @@ fun LibraryScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 4.dp)
                 )
+                uiState.importCount?.let { count ->
+                    Text(
+                        count,
+                        style = Bindery.type.numeralCaption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
             }
 
             val hero = uiState.hero.takeIf { browsingAll }
@@ -259,6 +273,7 @@ fun LibraryScreen(
             onToggleFavorite = { viewModel.toggleFavorite(book) },
             onAddToCollection = { pickCollection = true },
             onShowStats = { onOpenBookStats(book) },
+            onShowDetails = { onOpenBookDetails(book); viewModel.clearSelection() },
             onMarkAsFinished = { viewModel.markAsFinished(book) },
             onMarkAsUnread = { viewModel.markAsUnread(book) },
             onDelete = { confirmDelete = true },
@@ -341,28 +356,85 @@ private fun LazyListScope.sectionHeader(title: String) {
 
 // ── Bars ─────────────────────────────────────────────────────────────────────
 
-/** Two actions and an overflow; five icons in a row used to fight for attention. */
+/**
+ * The library's bar: the search field itself, always there to type into, and one menu for
+ * everything else. Five icons in a row used to fight for attention.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun LibraryTopBar(
+    searching: Boolean,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onSearch: () -> Unit,
     isGridView: Boolean,
     selectedSort: SortOption,
-    onSearch: () -> Unit,
+    sortDescending: Boolean,
     onSort: (SortOption) -> Unit,
+    onReverseSort: () -> Unit,
     onToggleView: () -> Unit,
+    onImportFolder: () -> Unit,
     onStats: () -> Unit,
     onCatalog: () -> Unit,
     onSettings: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(searching) { if (searching) focus.requestFocus() }
     TopAppBar(
-        title = { Text("Library") },
+        navigationIcon = {
+            if (searching) {
+                IconButton(onClick = onSearch) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close search") }
+            }
+        },
+        title = {
+            val colors = Bindery.colors
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(end = 4.dp)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(colors.page)
+                    .border(1.dp, colors.rule, RoundedCornerShape(24.dp))
+                    .then(if (searching) Modifier else Modifier.clickable(onClickLabel = "Search", onClick = onSearch))
+                    .padding(start = 14.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Box(Modifier.weight(1f)) {
+                    if (searching) {
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = query,
+                            onValueChange = onQueryChange,
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focus)
+                                .semantics { contentDescription = "Search titles, authors and words in books" },
+                        )
+                    }
+                    if (query.isEmpty()) {
+                        Text(
+                            if (searching) "Titles, authors, words in books" else "Search your library",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
+                    }
+                }
+                if (searching && query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) { Icon(Icons.Default.Clear, "Clear search") }
+                }
+            }
+        },
         actions = {
-            IconButton(onClick = onSearch) { Icon(Icons.Default.Search, "Search") }
-            IconButton(onClick = onStats) { Icon(Icons.Default.BarChart, "Reading stats") }
             Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
+                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Library menu") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                     DropdownMenuItem(
                         text = { Text("Sort by ${selectedSort.displayName.lowercase()}") },
@@ -376,10 +448,22 @@ private fun LibraryTopBar(
                         },
                         onClick = { menu = false; onToggleView() },
                     )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Import a folder") },
+                        leadingIcon = { Icon(Icons.Default.DriveFolderUpload, null) },
+                        onClick = { menu = false; onImportFolder() },
+                    )
                     DropdownMenuItem(
                         text = { Text("Browse catalogues") },
                         leadingIcon = { Icon(Icons.Default.Public, null) },
                         onClick = { menu = false; onCatalog() },
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Reading stats") },
+                        leadingIcon = { Icon(Icons.Default.BarChart, null) },
+                        onClick = { menu = false; onStats() },
                     )
                     DropdownMenuItem(
                         text = { Text("Settings") },
@@ -389,12 +473,26 @@ private fun LibraryTopBar(
                 }
                 DropdownMenu(expanded = sortMenu, onDismissRequest = { sortMenu = false }) {
                     SortOption.entries.forEach { sort ->
+                        val selected = selectedSort == sort
                         DropdownMenuItem(
                             text = { Text(sort.displayName) },
-                            onClick = { onSort(sort); sortMenu = false },
-                            leadingIcon = { if (selectedSort == sort) Icon(Icons.Default.Check, null) }
+                            // Picking the order already in use turns it around.
+                            onClick = { if (selected) onReverseSort() else onSort(sort); sortMenu = false },
+                            leadingIcon = { if (selected) Icon(Icons.Default.Check, null) },
+                            trailingIcon = {
+                                if (selected) Text(sort.directionLabel(sortDescending), style = Bindery.type.numeralCaption)
+                            },
+                            modifier = Modifier.semantics { this.selected = selected },
                         )
                     }
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("Reverse order") },
+                        leadingIcon = {
+                            Icon(if (sortDescending) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward, null)
+                        },
+                        onClick = { onReverseSort(); sortMenu = false },
+                    )
                 }
             }
         }
@@ -470,49 +568,6 @@ private fun SelectionBar(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SearchBar(
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onClose: () -> Unit
-) {
-    // Opening search means typing next: focus the field and bring the keyboard up.
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { focus.requestFocus() }
-    TopAppBar(
-        title = {
-            TextField(
-                value = query,
-                onValueChange = onQueryChange,
-                placeholder = { Text("Titles, authors, words in books") },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focus)
-            )
-        },
-        navigationIcon = {
-            IconButton(onClick = onClose) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close search")
-            }
-        },
-        actions = {
-            if (query.isNotEmpty()) {
-                IconButton(onClick = { onQueryChange("") }) {
-                    Icon(Icons.Default.Clear, "Clear")
-                }
-            }
-        }
-    )
-}
-
 /** Status shelves first, then the reader's own collections, then a way to make one. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -552,6 +607,8 @@ private fun ShelfRow(
                 color = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
                 border = BorderStroke(1.dp, if (selected) Color.Transparent else MaterialTheme.colorScheme.outlineVariant),
                 modifier = Modifier
+                    // Drawn 32dp tall like the chips beside it, touched at 48dp.
+                    .minimumInteractiveComponentSize()
                     .height(32.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .combinedClickable(
@@ -963,13 +1020,25 @@ private val ShelfOrder = listOf(
     FilterOption.EPUB, FilterOption.PDF, FilterOption.COMIC,
 )
 
-private val SortOption.displayName: String
+internal val SortOption.displayName: String
     get() = when (this) {
         SortOption.TITLE -> "Title"
         SortOption.AUTHOR -> "Author"
         SortOption.DATE_ADDED -> "Date added"
         SortOption.LAST_READ -> "Last read"
+        SortOption.PROGRESS -> "Progress"
+        SortOption.READING_TIME -> "Reading time"
+        SortOption.FILE_SIZE -> "File size"
     }
+
+/** Which way round the order runs, in its own terms: "A–Z", "Newest", "Largest". */
+private fun SortOption.directionLabel(descending: Boolean): String = when (this) {
+    SortOption.TITLE, SortOption.AUTHOR -> if (descending) "Z–A" else "A–Z"
+    SortOption.DATE_ADDED, SortOption.LAST_READ -> if (descending) "Newest" else "Oldest"
+    SortOption.PROGRESS -> if (descending) "Most read" else "Least read"
+    SortOption.READING_TIME -> if (descending) "Longest" else "Shortest"
+    SortOption.FILE_SIZE -> if (descending) "Largest" else "Smallest"
+}
 
 private val FilterOption.displayName: String
     get() = when (this) {

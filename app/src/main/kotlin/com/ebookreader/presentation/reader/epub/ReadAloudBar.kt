@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,7 +55,10 @@ internal fun ReadAloudBar(
                 )
             }
             IconButton(onClick = { onSkip(-1) }) { Icon(Icons.Default.SkipPrevious, "Previous sentence") }
-            FilledIconButton(onClick = onToggle) {
+            FilledIconButton(
+                onClick = onToggle,
+                modifier = Modifier.semantics { stateDescription = if (state.isPlaying) "Reading" else "Paused" },
+            ) {
                 if (state.isPlaying) Icon(Icons.Default.Pause, "Pause")
                 else Icon(Icons.Default.PlayArrow, "Play")
             }

@@ -17,10 +17,17 @@ sealed class Screen(val route: String) {
     object BookStats : Screen("book_stats/{bookId}") {
         fun createRoute(bookId: Long) = "book_stats/$bookId"
     }
+    object BookDetail : Screen("book/{bookId}") {
+        fun createRoute(bookId: Long) = "book/$bookId"
+    }
     object Catalog : Screen("catalog")
     object Settings : Screen("settings")
+    object SettingsSection : Screen("settings/{section}") {
+        fun createRoute(section: String) = "settings/$section"
+    }
     object Stats : Screen("stats")
     object MonthlyHistory : Screen("monthly_history")
     object YearlyHistory : Screen("yearly_history")
     object SessionHistory : Screen("session_history")
+    object FinishedTimeline : Screen("finished_timeline")
 }

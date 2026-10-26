@@ -5,4 +5,6 @@
     <string name="widget_description">The book you are reading, where you left it, and your reading streak</string>
     <string name="widget_label">Continue reading</string>
     <string name="widget_placeholder">Where you left your book</string>
+    <string name="tile_label">Continue reading</string>
+    <string name="tile_empty">No book open yet</string>
 </resources>

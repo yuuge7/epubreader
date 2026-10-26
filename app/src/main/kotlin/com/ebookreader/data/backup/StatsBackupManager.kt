@@ -2,7 +2,9 @@ package com.ebookreader.data.backup
 
 import androidx.room.withTransaction
 import com.ebookreader.BuildConfig
+import com.ebookreader.data.epub.ChapterLayoutMigrator
 import com.ebookreader.data.local.AppDatabase
+import com.ebookreader.domain.model.ChapterLayout
 import com.ebookreader.data.local.dao.BookDao
 import com.ebookreader.data.local.dao.HighlightDao
 import com.ebookreader.data.local.entity.HighlightEntity
@@ -37,9 +39,12 @@ class StatsBackupManager @Inject constructor(
     private val bookDao: BookDao,
     private val sessionDao: ReadingSessionDao,
     private val highlightDao: HighlightDao,
+    private val layouts: ChapterLayoutMigrator,
 ) {
 
     suspend fun export(): StatsBackup {
+        // Positions leave in the current numbering, whatever state the library is in.
+        layouts.migrateAll()
         val books = bookDao.getAllBooksOnce()
         val booksById = books.associateBy { it.id }
         val sessions = sessionDao.getAllSessionsOnce()
@@ -71,6 +76,7 @@ class StatsBackupManager @Inject constructor(
                     note = h.note,
                     color = h.toDomain().color.name,
                     createdAt = h.createdAt,
+                    chapterLayout = book.chapterLayout,
                 )
             },
         )
@@ -82,6 +88,36 @@ class StatsBackupManager @Inject constructor(
      *   rewind progress made on this device.
      */
     suspend fun import(
+        backup: StatsBackup,
+        mode: StatsImportMode,
+        restoreProgress: Boolean
+    ): StatsImportResult {
+        // A file from before chapters followed the spine numbers them the old way. The
+        // books here are brought to the current numbering first, and the file's numbers
+        // are carried over to it, book by book.
+        layouts.migrateAll()
+        val legacy = HashMap<Long, IntArray?>()
+        suspend fun mapLegacy(localId: Long, index: Int): Int {
+            // getOrPut would read a book with no map again for every snapshot.
+            if (localId !in legacy) legacy[localId] = layouts.legacyMap(localId)
+            val map = legacy[localId] ?: return index
+            return if (map.isEmpty()) index else map[index.coerceIn(0, map.size - 1)]
+        }
+        val localByKey = bookDao.getAllBooksOnce().associateBy { bookMatchKey(it.title, it.author) }
+        val mappedBooks = backup.books.map { snapshot ->
+            val local = localByKey[bookMatchKey(snapshot.title, snapshot.author)]
+            if (snapshot.chapterLayout != null || local == null || local.format != "EPUB") snapshot
+            else snapshot.copy(currentPage = mapLegacy(local.id, snapshot.currentPage), chapterLayout = ChapterLayout.CURRENT)
+        }
+        val mappedHighlights = backup.highlights.map { h ->
+            val local = localByKey[bookMatchKey(h.bookTitle, h.bookAuthor)]
+            if (h.chapterLayout != null || local == null || local.format != "EPUB") h
+            else h.copy(chapterIndex = mapLegacy(local.id, h.chapterIndex), chapterLayout = ChapterLayout.CURRENT)
+        }
+        return applyImport(backup.copy(books = mappedBooks, highlights = mappedHighlights), mode, restoreProgress)
+    }
+
+    private suspend fun applyImport(
         backup: StatsBackup,
         mode: StatsImportMode,
         restoreProgress: Boolean
@@ -228,6 +264,7 @@ class StatsBackupManager @Inject constructor(
         lastRead = lastRead,
         totalReadingSeconds = totalReadingSeconds,
         positionLabel = positionLabel,
+        chapterLayout = chapterLayout,
     )
 
     /** A session is the same session if it is the same book, instant and length. */

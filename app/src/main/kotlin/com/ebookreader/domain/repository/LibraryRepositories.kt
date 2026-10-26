@@ -30,3 +30,17 @@ interface BookTextSearch {
     suspend fun indexPending()
     suspend fun search(query: String, limit: Int = 60): List<TextSearchHit>
 }
+
+/** The reading history, summed. */
+interface ReadingHistory {
+    /** Emits once now and whenever the history changes. */
+    fun changes(): Flow<Unit>
+    /** Seconds read on each local day that has any reading; a sitting counts on the day it began. */
+    suspend fun secondsByDay(): Map<java.time.LocalDate, Long>
+    /** Seconds read in sittings begun at or after [since] (epoch millis). */
+    suspend fun totalSeconds(since: Long = 0L): Long
+    /** The books read longest since [since], longest first. */
+    suspend fun topBooks(since: Long, limit: Int): List<com.ebookreader.domain.model.BookReadingStat>
+    suspend fun recent(limit: Int): List<com.ebookreader.domain.model.ReadingSession>
+    suspend fun allSessions(): List<com.ebookreader.domain.model.ReadingSession>
+}

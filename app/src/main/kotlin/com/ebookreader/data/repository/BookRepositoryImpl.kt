@@ -8,6 +8,7 @@ import com.ebookreader.data.local.dao.BookmarkDao
 import com.ebookreader.data.local.dao.ReadingSessionDao
 import com.ebookreader.data.local.entity.BookEntity
 import com.ebookreader.data.local.entity.BookmarkEntity
+import com.ebookreader.data.local.entity.ReadingSettingsCodec
 import com.ebookreader.data.local.entity.ReadingSessionEntity
 import com.ebookreader.data.local.entity.toColumn
 import com.ebookreader.domain.model.*
@@ -32,30 +33,21 @@ class BookRepositoryImpl @Inject constructor(
     @ApplicationContext private val context: Context
 ) : BookRepository {
 
-    override fun getAllBooks(sortOption: SortOption): Flow<List<Book>> {
-        return when (sortOption) {
-            SortOption.TITLE -> bookDao.getAllBooksSortedByTitle()
-            SortOption.AUTHOR -> bookDao.getAllBooksSortedByAuthor()
-            SortOption.DATE_ADDED -> bookDao.getAllBooks()
-            SortOption.LAST_READ -> bookDao.getAllBooksSortedByLastRead()
-        }.map { entities -> entities.map { it.toDomain() } }
-    }
+    /** Sorted here rather than in SQL: the keys include derived ones, like progress. */
+    override fun getAllBooks(sortOption: SortOption, descending: Boolean): Flow<List<Book>> =
+        bookDao.getAllBooks().map { entities -> entities.map { it.toDomain() }.sortedBy(sortOption, descending) }
 
-    override fun getFilteredBooks(filter: FilterOption, sort: SortOption): Flow<List<Book>> {
-        return when (filter) {
-            FilterOption.ALL -> getAllBooks(sort)
+    override fun getFilteredBooks(filter: FilterOption, sort: SortOption, descending: Boolean): Flow<List<Book>> {
+        val books = when (filter) {
+            FilterOption.ALL -> bookDao.getAllBooks()
             FilterOption.PDF -> bookDao.getBooksByFormat(BookFormat.PDF.name)
-                .map { it.map { entity -> entity.toDomain() } }
             FilterOption.EPUB -> bookDao.getBooksByFormat(BookFormat.EPUB.name)
-                .map { it.map { entity -> entity.toDomain() } }
             FilterOption.COMIC -> bookDao.getBooksByFormat(BookFormat.COMIC.name)
-                .map { it.map { entity -> entity.toDomain() } }
-            FilterOption.FAVORITES -> getFavoriteBooks()
+            FilterOption.FAVORITES -> bookDao.getFavoriteBooks()
             FilterOption.READING -> bookDao.getBooksByStatus(ReadingStatus.READING.name)
-                .map { it.map { entity -> entity.toDomain() } }
             FilterOption.FINISHED -> bookDao.getBooksByStatus(ReadingStatus.FINISHED.name)
-                .map { it.map { entity -> entity.toDomain() } }
         }
+        return books.map { entities -> entities.map { it.toDomain() }.sortedBy(sort, descending) }
     }
 
     override fun searchBooks(query: String): Flow<List<Book>> =
@@ -91,6 +83,29 @@ class BookRepositoryImpl @Inject constructor(
 
     override suspend fun getBookByFilePath(filePath: String): Book? =
         bookDao.getBookByFilePath(filePath)?.toDomain()
+
+    override suspend fun getBookByContentHash(hash: String): Book? =
+        bookDao.getBookByContentHash(hash)?.toDomain()
+
+    override fun observeBook(id: Long): Flow<Book?> = bookDao.observeBook(id).map { it?.toDomain() }
+
+    override fun getFinishedBooks(): Flow<List<Book>> =
+        bookDao.getFinishedBooks().map { it.map { entity -> entity.toDomain() } }
+
+    override suspend fun getRecentlyRead(limit: Int): List<Book> =
+        bookDao.getRecentlyRead(limit).map { it.toDomain() }
+
+    override suspend fun updateTitleAndAuthor(bookId: Long, title: String, author: String) =
+        bookDao.updateTitleAndAuthor(bookId, title, author)
+
+    override suspend fun updateCover(bookId: Long, coverPath: String?) {
+        val old = bookDao.getBookById(bookId)?.coverPath
+        bookDao.updateCover(bookId, coverPath)
+        if (old != null && old != coverPath) withContext(Dispatchers.IO) { deleteIfOwned(old) }
+    }
+
+    override suspend fun updateReadingSettings(bookId: Long, settings: BookReadingSettings?) =
+        bookDao.updateReadingSettings(bookId, ReadingSettingsCodec.encode(settings))
 
     override suspend fun insertBook(book: Book): Long =
         bookDao.insertBook(BookEntity.fromDomain(book))
@@ -178,6 +193,9 @@ class BookRepositoryImpl @Inject constructor(
 
     override suspend fun getBookmarkByPage(bookId: Long, page: Int): Bookmark? =
         bookmarkDao.getBookmarkByPage(bookId, page)?.toDomain()
+
+    override suspend fun updateBookmark(bookmark: Bookmark) =
+        bookmarkDao.updateBookmark(BookmarkEntity.fromDomain(bookmark))
 
     /**
      * Records a stretch of reading time.

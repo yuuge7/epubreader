@@ -1,5 +1,6 @@
 package com.ebookreader.data.local.entity
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -27,7 +28,13 @@ data class BookmarkEntity(
     val chapterId: String? = null,
     val chapterTitle: String? = null,
     val note: String = "",
-    val dateCreated: Long = Date().time
+    val dateCreated: Long = Date().time,
+    @ColumnInfo(defaultValue = "0")
+    val scrollFraction: Float = 0f,
+    @ColumnInfo(defaultValue = "-1")
+    val textOffset: Int = -1,
+    @ColumnInfo(defaultValue = "''")
+    val excerpt: String = "",
 ) {
     fun toDomain() = Bookmark(
         id = id,
@@ -36,7 +43,10 @@ data class BookmarkEntity(
         chapterId = chapterId,
         chapterTitle = chapterTitle,
         note = note,
-        dateCreated = Date(dateCreated)
+        dateCreated = Date(dateCreated),
+        scrollFraction = scrollFraction,
+        textOffset = textOffset,
+        excerpt = excerpt,
     )
 
     companion object {
@@ -47,7 +57,10 @@ data class BookmarkEntity(
             chapterId = bookmark.chapterId,
             chapterTitle = bookmark.chapterTitle,
             note = bookmark.note,
-            dateCreated = bookmark.dateCreated.time
+            dateCreated = bookmark.dateCreated.time,
+            scrollFraction = bookmark.scrollFraction,
+            textOffset = bookmark.textOffset,
+            excerpt = bookmark.excerpt,
         )
     }
 }

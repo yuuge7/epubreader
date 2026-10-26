@@ -67,8 +67,8 @@ internal fun MarksPanel(
     bookmarks: List<Bookmark>,
     highlights: List<Highlight>,
     chapters: List<EpubChapter>,
-    currentChapterIndex: Int,
-    onJumpToChapter: (Int) -> Unit,
+    currentBookmark: Bookmark?,
+    onOpenBookmark: (Bookmark) -> Unit,
     onDeleteBookmark: (Bookmark) -> Unit,
     onOpenHighlight: (Highlight) -> Unit,
 ) {
@@ -80,7 +80,7 @@ internal fun MarksPanel(
         }
         Spacer(Modifier.height(12.dp))
         if (tab == 0) {
-            EpubBookmarksPanel(bookmarks, currentChapterIndex, onJumpToChapter, onDeleteBookmark)
+            EpubBookmarksPanel(bookmarks, chapters, currentBookmark, onOpenBookmark, onDeleteBookmark)
         } else if (highlights.isEmpty()) {
             Text(
                 "Select text on the page and choose Highlight or Note.",
@@ -253,26 +253,34 @@ internal fun HighlightSheet(
                 )
             }
             Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
                 HighlightColor.entries.forEach { color ->
                     val selected = color == highlight.color
+                    // A 36dp swatch in a 48dp target.
                     Box(
                         Modifier
-                            .size(36.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
-                            .background(color.swatch)
-                            .border(
-                                width = if (selected) 3.dp else 0.dp,
-                                color = if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
-                                shape = CircleShape,
-                            )
                             .clickable { onColor(color) }
                             .semantics {
                                 contentDescription = color.label
                                 role = Role.RadioButton
                                 this.selected = selected
-                            }
-                    )
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(color.swatch)
+                                .border(
+                                    width = if (selected) 3.dp else 0.dp,
+                                    color = if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+                                    shape = CircleShape,
+                                )
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))

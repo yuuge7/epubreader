@@ -25,4 +25,10 @@ interface HighlightDao {
     /** One-shot read for sync; the Flow variant never completes. */
     @Query("SELECT * FROM highlights")
     suspend fun getAllOnce(): List<HighlightEntity>
+
+    @Query("UPDATE highlights SET chapterIndex = :chapterIndex WHERE id = :id")
+    suspend fun setChapter(id: Long, chapterIndex: Int)
+
+    @Query("SELECT * FROM highlights WHERE bookId = :bookId")
+    suspend fun getForBookOnce(bookId: Long): List<HighlightEntity>
 }

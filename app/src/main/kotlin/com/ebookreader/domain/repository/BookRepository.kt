@@ -4,8 +4,8 @@ import com.ebookreader.domain.model.*
 import kotlinx.coroutines.flow.Flow
 
 interface BookRepository {
-    fun getAllBooks(sortOption: SortOption): Flow<List<Book>>
-    fun getFilteredBooks(filter: FilterOption, sort: SortOption): Flow<List<Book>>
+    fun getAllBooks(sortOption: SortOption, descending: Boolean = sortOption.descendingByDefault): Flow<List<Book>>
+    fun getFilteredBooks(filter: FilterOption, sort: SortOption, descending: Boolean): Flow<List<Book>>
     fun searchBooks(query: String): Flow<List<Book>>
     fun getFavoriteBooks(): Flow<List<Book>>
     fun getRecentBooks(): Flow<List<Book>>
@@ -14,6 +14,15 @@ interface BookRepository {
     suspend fun getBooksInSeries(series: String): List<Book>
     suspend fun getBookById(id: Long): Book?
     suspend fun getBookByFilePath(filePath: String): Book?
+    suspend fun getBookByContentHash(hash: String): Book?
+    fun observeBook(id: Long): Flow<Book?>
+    /** Finished books, most recently finished first. */
+    fun getFinishedBooks(): Flow<List<Book>>
+    suspend fun getRecentlyRead(limit: Int): List<Book>
+    suspend fun updateTitleAndAuthor(bookId: Long, title: String, author: String)
+    /** Sets the cover; a replaced cover the app made is deleted. */
+    suspend fun updateCover(bookId: Long, coverPath: String?)
+    suspend fun updateReadingSettings(bookId: Long, settings: BookReadingSettings?)
     suspend fun insertBook(book: Book): Long
     suspend fun updateBook(book: Book)
     suspend fun deleteBook(book: Book)
@@ -49,6 +58,7 @@ interface BookRepository {
     suspend fun deleteBookmark(bookmark: Bookmark)
     suspend fun isPageBookmarked(bookId: Long, page: Int): Boolean
     suspend fun getBookmarkByPage(bookId: Long, page: Int): Bookmark?
+    suspend fun updateBookmark(bookmark: Bookmark)
     suspend fun addReadingSeconds(bookId: Long, seconds: Long)
 
     fun getAllReadingSessions(): Flow<List<ReadingSession>>

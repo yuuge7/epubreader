@@ -16,7 +16,62 @@ enum class BookFormat {
 }
 
 enum class ReadingStatus { NOT_STARTED, READING, FINISHED }
-enum class SortOption { TITLE, AUTHOR, DATE_ADDED, LAST_READ }
+
+/**
+ * How the chapters of an EPUB are numbered.
+ *
+ * [LEGACY]: one chapter per entry of the NCX contents list, or per spine item when the NCX
+ * was not found. Two entries pointing into one file were two chapters showing that whole
+ * file, and spine items the NCX left out (a cover, a title page) could not be reached.
+ *
+ * [SPINE]: one chapter per file of the reading order, which is what is shown. The contents
+ * list is kept apart from it, nested, and points at places inside those files.
+ */
+object ChapterLayout {
+    const val LEGACY = 1
+    const val SPINE = 2
+    const val CURRENT = SPINE
+}
+enum class SortOption(
+    /** Newest, longest, furthest first; names A to Z. */
+    val descendingByDefault: Boolean,
+) {
+    TITLE(false), AUTHOR(false), DATE_ADDED(true), LAST_READ(true),
+    PROGRESS(true), READING_TIME(true), FILE_SIZE(true);
+
+    /** Orders books by this key alone, ascending. */
+    val keyComparator: Comparator<Book>
+        get() = when (this) {
+            TITLE -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.title.sortKey() }
+            AUTHOR -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.author.sortKey() }
+            DATE_ADDED -> compareBy { it.dateAdded }
+            // Never-opened books sort as the oldest.
+            LAST_READ -> compareBy { it.lastRead?.time ?: Long.MIN_VALUE }
+            PROGRESS -> compareBy { it.readingProgress }
+            READING_TIME -> compareBy { it.totalReadingSeconds }
+            FILE_SIZE -> compareBy { it.fileSize }
+        }
+}
+
+/**
+ * Books sorted by [sort], from the top or the bottom of its order. Ties go A to Z by
+ * title either way: only the key turns around.
+ */
+fun List<Book>.sortedBy(sort: SortOption, descending: Boolean): List<Book> {
+    val key = if (descending) sort.keyComparator.reversed() else sort.keyComparator
+    return sortedWith(key.thenBy(String.CASE_INSENSITIVE_ORDER) { it.title.sortKey() })
+}
+
+/** "The Hobbit" files under H: a leading article does not decide where a title sorts. */
+internal fun String.sortKey(): String {
+    val t = trim()
+    for (article in listOf("the ", "a ", "an ")) {
+        if (t.length > article.length && t.regionMatches(0, article, 0, article.length, ignoreCase = true)) {
+            return t.substring(article.length)
+        }
+    }
+    return t
+}
 enum class FilterOption { ALL, PDF, EPUB, COMIC, FAVORITES, READING, FINISHED }
 
 data class Book(
@@ -55,6 +110,19 @@ data class Book(
     val sourceFormat: String? = null,
     /** Whether the text is in the full-text search index. */
     val textIndexed: Boolean = false,
+    /**
+     * How an EPUB's chapters are numbered, which every saved position, bookmark and
+     * highlight is stored against. See [ChapterLayout].
+     */
+    val chapterLayout: Int = ChapterLayout.CURRENT,
+    /** The publisher's blurb, as plain text. */
+    val description: String? = null,
+    /** SHA-256 of the file as it was imported, to know the same book under another name. */
+    val contentHash: String? = null,
+    /** Type and page for this book alone; null follows the app's settings. */
+    val readingSettings: BookReadingSettings? = null,
+    /** When the book was finished, for the timeline; kept if it is read again. */
+    val finishedAt: Date? = null,
 ) {
     val readingProgress: Float
         get() = when {

@@ -13,7 +13,8 @@ import java.util.Date
  */
 @Entity(
     tableName = "reading_sessions",
-    indices = [Index("bookId")]
+    // startedAt: the stats are summed by day, month and year in SQL.
+    indices = [Index("bookId"), Index("startedAt")]
 )
 data class ReadingSessionEntity(
     @PrimaryKey(autoGenerate = true)

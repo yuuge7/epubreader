@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -34,6 +35,7 @@ fun StatsScreen(
     onNavigateToMonthlyHistory: () -> Unit,
     onNavigateToYearlyHistory: () -> Unit,
     onNavigateToSessionHistory: () -> Unit,
+    onNavigateToFinished: () -> Unit,
     viewModel: StatsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -46,6 +48,10 @@ fun StatsScreen(
     val exportPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(StatsBackupCodec.MIME_TYPE)
     ) { uri: Uri? -> uri?.let(viewModel::exportStats) }
+
+    val csvPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/csv")
+    ) { uri: Uri? -> uri?.let(viewModel::exportCsv) }
 
     // Not every provider tags a .json file as application/json, so accept the usual
     // stand-ins too — the file itself is validated when it is decoded.
@@ -103,6 +109,14 @@ fun StatsScreen(
                             onClick = {
                                 showBackupMenu = false
                                 exportPicker.launch(viewModel.suggestedFileName())
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Export sittings as CSV") },
+                            leadingIcon = { Icon(Icons.Default.TableChart, null) },
+                            onClick = {
+                                showBackupMenu = false
+                                csvPicker.launch(viewModel.suggestedCsvName())
                             }
                         )
                         DropdownMenuItem(
@@ -177,6 +191,23 @@ fun StatsScreen(
                             icon = Icons.Default.History,
                             modifier = Modifier.fillMaxWidth()
                         )
+                    }
+
+                    if (uiState.finished.isNotEmpty()) {
+                        item {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Finished",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = onNavigateToFinished) { Text("Timeline") }
+                            }
+                        }
+                        item { FinishedStrip(uiState.finished.take(8), onOpen = onNavigateToFinished) }
                     }
 
                     // Top Books Section
@@ -275,13 +306,19 @@ private fun ImportOptionsDialog(
                     onClick = { mode = StatsImportMode.REPLACE }
                 )
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                // The whole row is the checkbox: a bigger target, read out as one thing.
                 Row(
+                    modifier = Modifier.toggleable(
+                        value = restoreProgress,
+                        onValueChange = { restoreProgress = it },
+                        role = androidx.compose.ui.semantics.Role.Checkbox,
+                    ),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Checkbox(
                         checked = restoreProgress,
-                        onCheckedChange = { restoreProgress = it }
+                        onCheckedChange = null
                     )
                     Column(Modifier.weight(1f)) {
                         Text("Restore reading positions", style = MaterialTheme.typography.bodyMedium)

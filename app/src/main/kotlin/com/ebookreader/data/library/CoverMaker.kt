@@ -64,6 +64,20 @@ class CoverMaker @Inject constructor(
         save(bitmap, bookFileName)
     }.getOrNull()
 
+    /**
+     * An image the reader picked as a book's cover. Saved under a name of its own each
+     * time, so a cover shown before is never served from an image cache in its place.
+     */
+    fun customCover(image: ByteArray, bookFileName: String): String? =
+        imageCover(image, "${bookFileName.substringBeforeLast(".")}_custom_${System.currentTimeMillis()}.jpg")
+
+    /** The cover the book itself carries again: an EPUB's image, a PDF's first page. */
+    fun originalCover(file: File, epubCover: ByteArray?): String? = when {
+        epubCover != null -> imageCover(epubCover, "${file.nameWithoutExtension}_${System.currentTimeMillis()}.jpg")
+        file.extension.equals("pdf", ignoreCase = true) -> pdfCover(file)
+        else -> null
+    }
+
     private fun save(bitmap: Bitmap, bookFileName: String): String {
         val dest = File(coversDir, "${bookFileName.substringBeforeLast(".")}_cover.jpg")
         dest.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 85, it) }

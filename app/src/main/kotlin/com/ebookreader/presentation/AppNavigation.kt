@@ -42,28 +42,34 @@ fun AppNavigation(
         onPendingOpenHandled()
     }
 
+    // With animations removed in the system settings, screens change without moving.
+    val still = com.ebookreader.presentation.reader.rememberReducedMotion()
     NavHost(
         navController = navController,
         startDestination = startDestination,
         enterTransition = {
+            if (still) return@NavHost EnterTransition.None
             fadeIn(animationSpec = tween(300)) + slideInHorizontally(
                 initialOffsetX = { it / 4 },
                 animationSpec = tween(300)
             )
         },
         exitTransition = {
+            if (still) return@NavHost ExitTransition.None
             fadeOut(animationSpec = tween(300)) + slideOutHorizontally(
                 targetOffsetX = { -it / 4 },
                 animationSpec = tween(300)
             )
         },
         popEnterTransition = {
+            if (still) return@NavHost EnterTransition.None
             fadeIn(animationSpec = tween(300)) + slideInHorizontally(
                 initialOffsetX = { -it / 4 },
                 animationSpec = tween(300)
             )
         },
         popExitTransition = {
+            if (still) return@NavHost ExitTransition.None
             fadeOut(animationSpec = tween(300)) + slideOutHorizontally(
                 targetOffsetX = { it / 4 },
                 animationSpec = tween(300)
@@ -94,6 +100,18 @@ fun AppNavigation(
                     navController.navigate(Screen.EpubReader.createRoute(book.id, chapter, query))
                 },
                 onOpenBookStats = { book -> navController.navigate(Screen.BookStats.createRoute(book.id)) },
+                onOpenBookDetails = { book -> navController.navigate(Screen.BookDetail.createRoute(book.id)) },
+            )
+        }
+
+        composable(
+            route = Screen.BookDetail.route,
+            arguments = listOf(navArgument("bookId") { type = NavType.LongType })
+        ) {
+            com.ebookreader.presentation.library.BookDetailScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onRead = { book -> navController.navigate(readerRoute(book)) },
+                onShowStats = { book -> navController.navigate(Screen.BookStats.createRoute(book.id)) },
             )
         }
 
@@ -105,6 +123,8 @@ fun AppNavigation(
             ReaderTheme(settings.theme, settings.readingTheme) {
                 PdfReaderScreen(
                     bookId = bookId,
+                    settings = settings,
+                    onEditSettings = onEditSettings,
                     onNavigateBack = { navController.popBackStack() }
                 )
             }
@@ -120,16 +140,15 @@ fun AppNavigation(
         ) { backStackEntry ->
             val args = backStackEntry.arguments ?: return@composable
             val bookId = args.getLong("bookId")
-            ReaderTheme(settings.theme, settings.readingTheme) {
-                EpubReaderScreen(
-                    bookId = bookId,
-                    startChapter = args.getInt("chapter", -1),
-                    searchQuery = args.getString("q")?.takeIf { it.isNotBlank() },
-                    settings = settings,
-                    onEditSettings = onEditSettings,
-                    onNavigateBack = { navController.popBackStack() }
-                )
-            }
+            // Sets its own reading theme: a book can keep one of its own.
+            EpubReaderScreen(
+                bookId = bookId,
+                startChapter = args.getInt("chapter", -1),
+                searchQuery = args.getString("q")?.takeIf { it.isNotBlank() },
+                settings = settings,
+                onEditSettings = onEditSettings,
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
 
         composable(
@@ -138,6 +157,7 @@ fun AppNavigation(
         ) {
             ReaderTheme(settings.theme, settings.readingTheme) {
                 ComicReaderScreen(
+                    keepScreenOn = settings.keepScreenOn,
                     rightToLeft = settings.comicRightToLeft,
                     onToggleDirection = { onEditSettings { it.copy(comicRightToLeft = !it.comicRightToLeft) } },
                     onNavigateBack = { navController.popBackStack() }
@@ -161,6 +181,19 @@ fun AppNavigation(
 
         composable(Screen.Settings.route) {
             SettingsScreen(
+                onOpenSection = { section -> navController.navigate(Screen.SettingsSection.createRoute(section.route)) },
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.SettingsSection.route,
+            arguments = listOf(navArgument("section") { type = NavType.StringType })
+        ) { entry ->
+            val section = com.ebookreader.presentation.settings.SettingsSection.of(entry.arguments?.getString("section"))
+                ?: return@composable
+            com.ebookreader.presentation.settings.SettingsSectionScreen(
+                section = section,
                 settings = settings,
                 onEditSettings = onEditSettings,
                 onNavigateBack = { navController.popBackStack() }
@@ -172,7 +205,15 @@ fun AppNavigation(
                 onNavigateBack = { navController.popBackStack() },
                 onNavigateToMonthlyHistory = { navController.navigate(Screen.MonthlyHistory.route) },
                 onNavigateToYearlyHistory = { navController.navigate(Screen.YearlyHistory.route) },
-                onNavigateToSessionHistory = { navController.navigate(Screen.SessionHistory.route) }
+                onNavigateToSessionHistory = { navController.navigate(Screen.SessionHistory.route) },
+                onNavigateToFinished = { navController.navigate(Screen.FinishedTimeline.route) },
+            )
+        }
+
+        composable(Screen.FinishedTimeline.route) {
+            com.ebookreader.presentation.stats.FinishedTimelineScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onOpenBook = { book -> navController.navigate(Screen.BookDetail.createRoute(book.id)) },
             )
         }
 

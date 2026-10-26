@@ -45,7 +45,7 @@ class ConvertersTest {
         assertEquals(listOf("One", "Two"), parsed.book.chapters.map { it.title })
         assertEquals("Kettles", parsed.book.series)
         assertEquals(2f, parsed.book.seriesIndex)
-        assertTrue(parsed.chapterContents.values.first().contains("<p>First.</p>"))
+        assertTrue(parsed.chapterHtml(0)!!.contains("<p>First.</p>"))
     }
 
     // ── Plain text ───────────────────────────────────────────────────────────

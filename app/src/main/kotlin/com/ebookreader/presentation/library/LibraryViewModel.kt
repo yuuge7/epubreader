@@ -43,7 +43,10 @@ data class LibraryUiState(
     val selectedCollection: Long? = null,
     val collections: List<BookCollection> = emptyList(),
     val selectedSort: SortOption = SortOption.DATE_ADDED,
+    val sortDescending: Boolean = SortOption.DATE_ADDED.descendingByDefault,
     val importProgress: Float? = null,
+    /** "3 of 12", while a folder is being imported. */
+    val importCount: String? = null,
     /** Set when an imported/opened-from-outside book should be opened immediately. */
     val bookToOpen: Book? = null,
     val hero: Hero? = null,
@@ -73,24 +76,30 @@ class LibraryViewModel @Inject constructor(
     init {
         maintenance.runOnce()
 
-        // Seed sort/filter from the saved settings. They used to live only in memory,
-        // so the "Default Sort" setting did nothing and both reset on every launch.
+        // Sort and filter come from the saved settings, and follow them: Settings has its
+        // own sort controls, and a change there must show here on return.
         viewModelScope.launch {
             val settings = settingsRepository.getSettings().first()
-            _uiState.update {
-                it.copy(selectedFilter = settings.filterOption, selectedSort = settings.sortOption)
-            }
+            _uiState.update { it.copy(selectedFilter = settings.filterOption) }
+        }
+        viewModelScope.launch {
+            settingsRepository.getSettings()
+                .map { it.sortOption to it.sortDescending }
+                .distinctUntilChanged()
+                .collect { (sort, descending) ->
+                    _uiState.update { it.copy(selectedSort = sort, sortDescending = descending) }
+                }
         }
 
         viewModelScope.launch {
             // What the shelves show follows from the state alone: filter, sort, search, shelf.
-            _uiState.map { Query(it.selectedFilter, it.selectedSort, it.searchQuery, it.selectedCollection) }
+            _uiState.map { Query(it.selectedFilter, it.selectedSort, it.sortDescending, it.searchQuery, it.selectedCollection) }
                 .distinctUntilChanged()
                 .flatMapLatest { q ->
                 when {
-                    q.search.isNotBlank() -> bookRepository.searchBooks(q.search)
-                    q.shelf != null -> bookRepository.getBooksInCollection(q.shelf)
-                    else -> bookRepository.getFilteredBooks(q.filter, q.sort)
+                    q.search.isNotBlank() -> bookRepository.searchBooks(q.search).map { it.sortedBy(q.sort, q.descending) }
+                    q.shelf != null -> bookRepository.getBooksInCollection(q.shelf).map { it.sortedBy(q.sort, q.descending) }
+                    else -> bookRepository.getFilteredBooks(q.filter, q.sort, q.descending)
                 }
             }.collect { books ->
                 _uiState.update { state ->
@@ -135,7 +144,13 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private data class Query(val filter: FilterOption, val sort: SortOption, val search: String, val shelf: Long?)
+    private data class Query(
+        val filter: FilterOption,
+        val sort: SortOption,
+        val descending: Boolean,
+        val search: String,
+        val shelf: Long?,
+    )
 
     /**
      * The next book of a series the reader has just finished, if the library has it;
@@ -181,9 +196,17 @@ class LibraryViewModel @Inject constructor(
         _uiState.update { it.copy(selectedCollection = id) }
     }
 
+    /** A new order starts the natural way round: A to Z, or newest and longest first. */
     fun setSort(sort: SortOption) {
-        _uiState.update { it.copy(selectedSort = sort) }
-        persistSettings { it.copy(sortOption = sort) }
+        val descending = sort.descendingByDefault
+        _uiState.update { it.copy(selectedSort = sort, sortDescending = descending) }
+        persistSettings { it.copy(sortOption = sort, sortDescending = descending) }
+    }
+
+    fun toggleSortDirection() {
+        val descending = !_uiState.value.sortDescending
+        _uiState.update { it.copy(sortDescending = descending) }
+        persistSettings { it.copy(sortDescending = descending) }
     }
 
     private fun persistSettings(transform: (AppSettings) -> AppSettings) {
@@ -329,6 +352,26 @@ class LibraryViewModel @Inject constructor(
     private fun say(message: String) = _uiState.update { it.copy(message = message) }
 
     // ── Import ───────────────────────────────────────────────────────────────
+
+    /**
+     * Every book in a folder the reader picked, and in the folders inside it, one after
+     * another. Files that are not books are passed over without a word; at the end one
+     * line says what came in.
+     */
+    fun importFolder(tree: Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(importProgress = 0f, importCount = "Looking for books…") }
+            val outcome = importer.importFolder(tree) { done, total, fileProgress ->
+                _uiState.update {
+                    it.copy(
+                        importProgress = (done + fileProgress) / total.coerceAtLeast(1),
+                        importCount = "Importing ${(done + 1).coerceAtMost(total)} of $total",
+                    )
+                }
+            }
+            _uiState.update { it.copy(importProgress = null, importCount = null, message = outcome.message) }
+        }
+    }
 
     /** Import from the picker. */
     fun importBook(uri: Uri) = importBook(uri, openWhenDone = false)

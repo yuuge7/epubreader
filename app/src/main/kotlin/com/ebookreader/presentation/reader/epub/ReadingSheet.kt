@@ -21,6 +21,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatAlignLeft
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.BrightnessLow
@@ -58,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ebookreader.domain.model.AppTheme
 import com.ebookreader.domain.model.ReaderFont
+import com.ebookreader.domain.model.ReadingFocus
 import com.ebookreader.domain.model.ReaderLight
 import com.ebookreader.domain.model.ReaderTypography
 import com.ebookreader.domain.model.ReadingTheme
@@ -82,10 +85,15 @@ internal fun ReadingSheet(
     light: ReaderLight,
     readingTheme: ReadingTheme,
     appTheme: AppTheme,
+    focus: ReadingFocus,
+    /** Whether these settings are this book's own, apart from the app's. */
+    bookOnly: Boolean,
     onTypographyChange: (ReaderTypography) -> Unit,
     onLightChange: (ReaderLight) -> Unit,
     onLightCommit: () -> Unit,
     onReadingThemeChange: (ReadingTheme) -> Unit,
+    onFocusChange: (ReadingFocus) -> Unit,
+    onBookOnlyChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     BinderySheet(onDismissRequest = onDismiss, scrimColor = Color.Transparent) {
@@ -107,6 +115,16 @@ internal fun ReadingSheet(
             )
 
             SheetSection("Layout")
+            PageModeRow(typography.paged) { onTypographyChange(typography.copy(paged = it)) }
+            if (typography.paged) {
+                SwitchRow(
+                    label = "Two pages side by side",
+                    detail = "In landscape and on large screens",
+                    checked = typography.twoColumns,
+                    onCheckedChange = { onTypographyChange(typography.copy(twoColumns = it)) },
+                )
+            }
+            Spacer(Modifier.height(4.dp))
             StepperRow(
                 label = "Line spacing",
                 value = typography.lineHeight,
@@ -135,9 +153,21 @@ internal fun ReadingSheet(
                 onCheckedChange = { onTypographyChange(typography.copy(hyphenate = it)) },
             )
 
+            SheetSection("Reading focus")
+            FocusRow(focus, onFocusChange)
+
             SheetSection("Light")
             BrightnessRow(light, onLightChange, onLightCommit)
             WarmthRow(light, onLightChange, onLightCommit)
+
+            SheetSection("This book")
+            SwitchRow(
+                label = "Only for this book",
+                detail = if (bookOnly) "Type and page here apply to this book alone"
+                else "Keep this book's type and page apart from your other books",
+                checked = bookOnly,
+                onCheckedChange = onBookOnlyChange,
+            )
         }
     }
 }
@@ -275,6 +305,50 @@ private fun FontPicker(selected: ReaderFont, onSelect: (ReaderFont) -> Unit) {
                 )
             }
         }
+    }
+}
+
+/** One long scroll per chapter, or pages turned sideways. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PageModeRow(paged: Boolean, onChange: (Boolean) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        SegmentedButton(
+            selected = !paged,
+            onClick = { onChange(false) },
+            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+            icon = { Icon(Icons.Default.SwapVert, null, Modifier.size(18.dp)) },
+        ) { Text("Scroll") }
+        SegmentedButton(
+            selected = paged,
+            onClick = { onChange(true) },
+            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+            icon = { Icon(Icons.AutoMirrored.Filled.MenuBook, null, Modifier.size(18.dp)) },
+        ) { Text("Pages") }
+    }
+}
+
+/** A band to read along, or the paragraphs around the one being read dimmed. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FocusRow(focus: ReadingFocus, onChange: (ReadingFocus) -> Unit) {
+    val options = listOf(ReadingFocus.OFF to "Off", ReadingFocus.RULER to "Ruler", ReadingFocus.DIM to "Dim the rest")
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        options.forEachIndexed { i, (value, label) ->
+            SegmentedButton(
+                selected = focus == value,
+                onClick = { onChange(value) },
+                shape = SegmentedButtonDefaults.itemShape(index = i, count = options.size),
+            ) { Text(label, maxLines = 1) }
+        }
+    }
+    if (focus != ReadingFocus.OFF) {
+        Text(
+            "Drag the tab at the right edge to move the reading line.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(top = 6.dp),
+        )
     }
 }
 

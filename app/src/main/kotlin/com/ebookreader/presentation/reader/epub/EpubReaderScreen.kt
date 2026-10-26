@@ -1,7 +1,5 @@
 package com.ebookreader.presentation.reader.epub
 
-import com.ebookreader.presentation.reader.rememberSittingSeconds
-import android.provider.Settings
 import android.widget.Toast
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
@@ -9,12 +7,14 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
@@ -25,8 +25,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,22 +40,31 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.webkit.WebViewAssetLoader
 import com.ebookreader.domain.model.AppSettings
+import com.ebookreader.domain.model.AutoScroll
+import com.ebookreader.domain.model.BookReadingSettings
 import com.ebookreader.domain.model.Bookmark
 import com.ebookreader.domain.model.EpubChapter
 import com.ebookreader.domain.model.ReaderLight
 import com.ebookreader.domain.model.ReaderTypography
 import com.ebookreader.domain.model.ScrollDirection
+import com.ebookreader.domain.model.TocEntry
+import com.ebookreader.domain.model.flatten
 import com.ebookreader.presentation.common.BarEdge
 import com.ebookreader.presentation.common.Bindery
 import com.ebookreader.presentation.common.BinderyCard
+import com.ebookreader.presentation.common.BinderySheet
 import com.ebookreader.presentation.common.ReaderBar
 import com.ebookreader.presentation.common.ReaderProgressFooter
+import com.ebookreader.presentation.common.ReaderTheme
 import com.ebookreader.presentation.common.SessionClock
 import com.ebookreader.presentation.common.ShareCards
-import com.ebookreader.presentation.common.BinderySheet
+import com.ebookreader.presentation.reader.ReaderWindow
+import com.ebookreader.presentation.reader.rememberReducedMotion
+import com.ebookreader.presentation.reader.rememberSittingSeconds
+import com.ebookreader.presentation.reader.rememberTouchExploration
 import java.io.File
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EpubReaderScreen(
     bookId: Long,
@@ -63,7 +76,24 @@ fun EpubReaderScreen(
     viewModel: EpubReaderViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // A book can keep its own page colour; everything else follows the app.
+    ReaderTheme(settings.theme, uiState.bookSettings?.readingTheme ?: settings.readingTheme) {
+        EpubReaderContent(uiState, bookId, startChapter, searchQuery, settings, onEditSettings, onNavigateBack, viewModel)
+    }
+}
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun EpubReaderContent(
+    uiState: EpubReaderUiState,
+    bookId: Long,
+    startChapter: Int,
+    searchQuery: String?,
+    settings: AppSettings,
+    onEditSettings: ((AppSettings) -> AppSettings) -> Unit,
+    onNavigateBack: () -> Unit,
+    viewModel: EpubReaderViewModel,
+) {
     LaunchedEffect(bookId) { viewModel.loadBook(bookId, startChapter, searchQuery) }
 
     val sessionSeconds = rememberSittingSeconds(
@@ -71,6 +101,9 @@ fun EpubReaderScreen(
         onPause = viewModel::onScreenPaused,
         elapsed = viewModel::currentSessionSeconds,
     )
+    val screenReader = rememberTouchExploration()
+    LaunchedEffect(screenReader) { viewModel.setScreenReader(screenReader) }
+    ReaderWindow(keepScreenOn = settings.keepScreenOn, showSystemBars = uiState.showControls)
 
     // Changes show from here at once and are saved behind them: a slider is saved when
     // it is let go, a tap straight away. Each draft is dropped once the saved settings
@@ -84,8 +117,9 @@ fun EpubReaderScreen(
     LaunchedEffect(settings.readerLight) {
         if (lightDraft == settings.readerLight) lightDraft = null
     }
-    val typography = typographyDraft ?: settings.typography
-    // The loaded pages, by chapter, for what needs the page's own answer (read-aloud).
+    val bookSettings = uiState.bookSettings
+    val typography = bookSettings?.typography ?: typographyDraft ?: settings.typography
+    // The loaded pages, by chapter, for what needs the page's own answer.
     val pageHandles = remember { mutableStateMapOf<Int, PageHandle>() }
     val context = LocalContext.current
     val pageColors = Bindery.colors
@@ -102,6 +136,7 @@ fun EpubReaderScreen(
     val readAloud by viewModel.readAloud.collectAsStateWithLifecycle()
     val speaking = readAloud.isActive && readAloud.bookId == bookId
     val startReadAloud: () -> Unit = {
+        viewModel.stopAutoScroll()
         val handle = pageHandles[uiState.currentChapterIndex]
         if (handle == null) viewModel.startReadAloud(null, settings.readAloudRate)
         else handle.firstVisibleText { viewModel.startReadAloud(it.ifBlank { null }, settings.readAloudRate) }
@@ -119,6 +154,21 @@ fun EpubReaderScreen(
         readAloud.error?.let {
             Toast.makeText(context, it, Toast.LENGTH_LONG).show()
             viewModel.clearReadAloudError()
+        }
+    }
+
+    // Auto-scroll runs while nothing else is in front of the page.
+    val anySheet = uiState.showTocSheet || uiState.showBookmarksSheet || uiState.showReadingSheet ||
+        uiState.showSearch || uiState.openHighlight != null || uiState.noteFor != null || uiState.bookmarkDraft != null
+    val autoScrollRunning = uiState.autoScrolling && !uiState.showControls && !anySheet && !speaking
+    val autoScrollSpeed = if (autoScrollRunning) settings.autoScrollSpeed * AutoScroll.PIXELS_PER_SECOND_PER_STEP else 0f
+
+    val addOrRemoveBookmark: () -> Unit = {
+        val here = uiState.bookmarkHere
+        if (here != null) viewModel.deleteBookmark(here)
+        else {
+            val handle = pageHandles[uiState.currentChapterIndex]
+            if (handle == null) viewModel.startBookmark(null) else handle.place(viewModel::startBookmark)
         }
     }
 
@@ -155,16 +205,38 @@ fun EpubReaderScreen(
             else -> {
                 val bookDir = uiState.bookDir
                 if (bookDir != null) {
+                    val turn: (Int) -> Unit = { dir -> pageHandles[uiState.currentChapterIndex]?.turn(dir) }
                     ReaderPages(
                         state = uiState,
                         viewModel = viewModel,
                         bookDir = bookDir,
                         typography = typography,
-                        swipe = settings.readerScrollDirection == ScrollDirection.HORIZONTAL,
+                        config = PageConfig(
+                            swipe = settings.readerScrollDirection == ScrollDirection.HORIZONTAL,
+                            smooth = !rememberReducedMotion(),
+                            language = uiState.language,
+                            a11y = screenReader,
+                            focus = settings.readingFocus,
+                        ),
+                        autoScroll = autoScrollSpeed,
                         pages = pageHandles,
-                        // The pages stop at the system bars, which show the page colour
-                        // behind them, so text never runs under the clock or the handle.
-                        modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars),
+                        // The page keeps one size whether or not the system bars are showing,
+                        // so they come and go without the text reflowing, and never over it.
+                        modifier = Modifier
+                            .windowInsetsPadding(WindowInsets.systemBarsIgnoringVisibility.union(WindowInsets.displayCutout))
+                            .semantics {
+                                // With a screen reader the page's tap zones stand aside;
+                                // the same moves are offered as actions on the page.
+                                customActions = listOf(
+                                    CustomAccessibilityAction(if (uiState.showControls) "Hide controls" else "Show controls") {
+                                        viewModel.setControlsVisible(!uiState.showControls); true
+                                    },
+                                    CustomAccessibilityAction("Next page") { turn(1); true },
+                                    CustomAccessibilityAction("Previous page") { turn(-1); true },
+                                    CustomAccessibilityAction("Next chapter") { viewModel.nextChapter(); true },
+                                    CustomAccessibilityAction("Previous chapter") { viewModel.previousChapter(); true },
+                                )
+                            },
                     )
                 }
 
@@ -180,11 +252,12 @@ fun EpubReaderScreen(
                         sessionSeconds = sessionSeconds,
                         onNavigateBack = onNavigateBack,
                         onReadAloud = startReadAloud,
+                        onBookmark = addOrRemoveBookmark,
                         viewModel = viewModel,
                     )
                 }
 
-                // ── Bottom bar, with the read-aloud controls above it ────
+                // ── Bottom bar, with read-aloud or auto-scroll above it ──
                 Column(Modifier.align(Alignment.BottomCenter)) {
                     AnimatedVisibility(
                         visible = speaking,
@@ -202,11 +275,26 @@ fun EpubReaderScreen(
                         )
                     }
                     AnimatedVisibility(
+                        visible = uiState.autoScrolling && !speaking,
+                        enter = fadeIn(tween(ControlsFadeMs)),
+                        exit = fadeOut(tween(ControlsFadeMs)),
+                    ) {
+                        AutoScrollBar(
+                            speed = settings.autoScrollSpeed,
+                            running = autoScrollRunning,
+                            insetBottom = !uiState.showControls,
+                            onSpeed = { speed -> onEditSettings { it.copy(autoScrollSpeed = speed) } },
+                            onPlay = { viewModel.setControlsVisible(false) },
+                            onPause = { viewModel.setControlsVisible(true) },
+                            onStop = viewModel::stopAutoScroll,
+                        )
+                    }
+                    AnimatedVisibility(
                         visible = uiState.showControls,
                         enter = fadeIn(tween(ControlsFadeMs)),
                         exit = fadeOut(tween(ControlsFadeMs)),
                     ) {
-                        ReaderBottomBar(state = uiState, viewModel = viewModel)
+                        ReaderBottomBar(state = uiState, paged = typography.paged, viewModel = viewModel)
                     }
                 }
             }
@@ -228,11 +316,16 @@ fun EpubReaderScreen(
         ReadingSheet(
             typography = typography,
             light = light,
-            readingTheme = settings.readingTheme,
+            readingTheme = bookSettings?.readingTheme ?: settings.readingTheme,
             appTheme = settings.theme,
+            focus = settings.readingFocus,
+            bookOnly = bookSettings != null,
             onTypographyChange = { t ->
-                typographyDraft = t
-                onEditSettings { it.copy(typography = t) }
+                if (bookSettings != null) viewModel.setBookSettings(bookSettings.copy(typography = t))
+                else {
+                    typographyDraft = t
+                    onEditSettings { it.copy(typography = t) }
+                }
             },
             onLightChange = { lightDraft = it },
             // Saves the draft rather than a value passed in: a slider's last change and
@@ -240,28 +333,51 @@ fun EpubReaderScreen(
             onLightCommit = {
                 lightDraft?.let { l -> onEditSettings { it.copy(readerLight = l) } }
             },
-            onReadingThemeChange = { theme -> onEditSettings { it.copy(readingTheme = theme) } },
+            onReadingThemeChange = { theme ->
+                if (bookSettings != null) viewModel.setBookSettings(bookSettings.copy(readingTheme = theme))
+                else onEditSettings { it.copy(readingTheme = theme) }
+            },
+            onFocusChange = { focus -> onEditSettings { it.copy(readingFocus = focus) } },
+            onBookOnlyChange = { only ->
+                // Starts from what the book looks like now, so nothing jumps.
+                viewModel.setBookSettings(
+                    if (only) BookReadingSettings(typography, settings.readingTheme) else null
+                )
+            },
             onDismiss = viewModel::hideReadingSheet,
         )
     }
 
-    if (uiState.showBookmarkDialog) {
+    uiState.bookmarkDraft?.let { draft ->
         AlertDialog(
             onDismissRequest = viewModel::dismissBookmarkDialog,
-            title = { Text("Add Bookmark") },
+            title = { Text("Add bookmark") },
             text = {
                 Column {
-                    Text("Chapter: ${uiState.chapters.getOrNull(uiState.currentChapterIndex)?.title ?: ""}")
-                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        uiState.chapters.getOrNull(draft.chapterIndex)?.title.orEmpty().uppercase(),
+                        style = Bindery.type.eyebrow,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    draft.place?.text?.takeIf { it.isNotBlank() }?.let { words ->
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "“$words…”",
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
-                        value = uiState.bookmarkNote,
+                        value = draft.note,
                         onValueChange = viewModel::setBookmarkNote,
                         label = { Text("Note (optional)") },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
-            confirmButton = { TextButton(onClick = viewModel::addBookmark) { Text("Save") } },
+            confirmButton = { TextButton(onClick = viewModel::saveBookmark) { Text("Save") } },
             dismissButton = { TextButton(onClick = viewModel::dismissBookmarkDialog) { Text("Cancel") } }
         )
     }
@@ -272,9 +388,11 @@ fun EpubReaderScreen(
             sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         ) {
             TableOfContentsPanel(
+                toc = uiState.toc,
                 chapters = uiState.chapters,
                 currentChapterIndex = uiState.currentChapterIndex,
-                onChapterSelected = viewModel::navigateToChapter
+                onEntry = viewModel::navigateToEntry,
+                onChapter = viewModel::navigateToChapter,
             )
         }
     }
@@ -288,11 +406,8 @@ fun EpubReaderScreen(
                 bookmarks = uiState.bookmarks,
                 highlights = uiState.highlights,
                 chapters = uiState.chapters,
-                currentChapterIndex = uiState.currentChapterIndex,
-                onJumpToChapter = { i ->
-                    viewModel.navigateToChapter(i)
-                    viewModel.hideBookmarksSheet()
-                },
+                currentBookmark = uiState.bookmarkHere,
+                onOpenBookmark = viewModel::goToBookmark,
                 onDeleteBookmark = viewModel::deleteBookmark,
                 onOpenHighlight = viewModel::goToHighlight,
             )
@@ -350,7 +465,8 @@ private fun ReaderPages(
     viewModel: EpubReaderViewModel,
     bookDir: String,
     typography: ReaderTypography,
-    swipe: Boolean,
+    config: PageConfig,
+    autoScroll: Float,
     /** The loaded pages by chapter, kept here for whoever needs a page's own answer. */
     pages: MutableMap<Int, PageHandle>,
     modifier: Modifier = Modifier,
@@ -362,16 +478,12 @@ private fun ReaderPages(
     }
     val style = PageStyle(typography, PageColors.of(colors), LocalDensity.current.fontScale)
     val css = remember(style) { readerCss(style) }
-    val reducedMotion = remember {
-        Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-    }
-    val config = PageConfig(swipe = swipe, smooth = !reducedMotion, language = state.language)
     val events = remember(viewModel) {
         object : PageEvents {
             override fun onTap(zone: Int) = viewModel.onPageTap(zone)
             override fun onEdge(direction: Int) = viewModel.onChapterEdge(direction)
             override fun onSwipe(direction: Int) = viewModel.onSwipe(direction)
-            override fun onScroll(fraction: Float) = viewModel.updateScrollProgress(fraction)
+            override fun onScroll(fraction: Float, span: Float) = viewModel.updateScrollProgress(fraction, span)
             override fun onInternalLink(path: String, fragment: String?) =
                 viewModel.navigateToInternalLink(path, fragment)
             override fun onHighlightTapped(id: Long) = viewModel.onHighlightTapped(id)
@@ -413,6 +525,7 @@ private fun ReaderPages(
                         highlights = chapterHighlights,
                         assets = assets,
                         paper = colors.paper,
+                        autoScroll = autoScroll,
                         events = events,
                         onReady = { handle ->
                             pages[index] = handle
@@ -457,6 +570,7 @@ private fun ReaderTopBar(
     sessionSeconds: Long,
     onNavigateBack: () -> Unit,
     onReadAloud: () -> Unit,
+    onBookmark: () -> Unit,
     viewModel: EpubReaderViewModel,
 ) {
     ReaderBar(BarEdge.Top) {
@@ -504,20 +618,15 @@ private fun ReaderTopBar(
             IconButton(onClick = viewModel::showTocSheet) {
                 Icon(Icons.Default.TableRows, "Contents")
             }
+            val marked = state.bookmarkHere != null
             IconButton(
-                onClick = {
-                    if (state.isCurrentChapterBookmarked)
-                        viewModel.removeBookmarkFromChapter(state.currentChapterIndex)
-                    else viewModel.showBookmarkDialog()
-                }
+                onClick = onBookmark,
+                modifier = Modifier.semantics { stateDescription = if (marked) "Bookmarked" else "Not bookmarked" },
             ) {
                 Icon(
-                    if (state.isCurrentChapterBookmarked) Icons.Default.Bookmark
-                    else Icons.Default.BookmarkBorder,
-                    if (state.isCurrentChapterBookmarked) "Remove bookmark" else "Add bookmark",
-                    tint = if (state.isCurrentChapterBookmarked)
-                        MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurface
+                    if (marked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                    if (marked) "Remove bookmark" else "Add bookmark",
+                    tint = if (marked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                 )
             }
             ReaderOverflowMenu(state, onReadAloud, viewModel)
@@ -537,6 +646,14 @@ private fun ReaderOverflowMenu(state: EpubReaderUiState, onReadAloud: () -> Unit
                 text = { Text("Read aloud") },
                 leadingIcon = { Icon(Icons.Default.Headphones, null) },
                 onClick = { open = false; onReadAloud() },
+            )
+            DropdownMenuItem(
+                text = { Text(if (state.autoScrolling) "Stop auto-scroll" else "Auto-scroll") },
+                leadingIcon = { Icon(if (state.autoScrolling) Icons.Default.Stop else Icons.Default.KeyboardDoubleArrowDown, null) },
+                onClick = {
+                    open = false
+                    if (state.autoScrolling) viewModel.stopAutoScroll() else viewModel.startAutoScroll()
+                },
             )
             DropdownMenuItem(
                 text = { Text("Find in book") },
@@ -565,7 +682,7 @@ private fun ReaderOverflowMenu(state: EpubReaderUiState, onReadAloud: () -> Unit
 }
 
 @Composable
-private fun ReaderBottomBar(state: EpubReaderUiState, viewModel: EpubReaderViewModel) {
+private fun ReaderBottomBar(state: EpubReaderUiState, paged: Boolean, viewModel: EpubReaderViewModel) {
     ReaderBar(BarEdge.Bottom) {
         Column(
             modifier = Modifier
@@ -586,7 +703,7 @@ private fun ReaderBottomBar(state: EpubReaderUiState, viewModel: EpubReaderViewM
                         Icon(Icons.Default.ChevronLeft, "Previous chapter")
                     }
                     Text(
-                        ((scrubTarget?.toInt() ?: state.currentChapterIndex) + 1).toString(),
+                        ((scrubTarget?.roundToInt() ?: state.currentChapterIndex) + 1).toString(),
                         style = Bindery.type.numeralSmall,
                         modifier = Modifier.widthIn(min = 24.dp)
                     )
@@ -594,13 +711,14 @@ private fun ReaderBottomBar(state: EpubReaderUiState, viewModel: EpubReaderViewM
                         value = scrubTarget ?: state.currentChapterIndex.toFloat(),
                         onValueChange = { v -> scrubTarget = v },
                         onValueChangeFinished = {
-                            scrubTarget?.let { viewModel.navigateToChapter(it.toInt()) }
+                            scrubTarget?.let { viewModel.navigateToChapter(it.roundToInt()) }
                             scrubTarget = null
                         },
                         valueRange = 0f..(state.totalChapters - 1).toFloat().coerceAtLeast(0f),
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 4.dp)
+                            .semantics { contentDescription = "Chapter" }
                     )
                     Text(
                         state.totalChapters.toString(),
@@ -615,6 +733,17 @@ private fun ReaderBottomBar(state: EpubReaderUiState, viewModel: EpubReaderViewM
                     }
                 }
             }
+            if (paged && state.screenSpan < 1f) {
+                // Pages of this chapter, as the layout counts them on this screen.
+                val pages = (1f / state.screenSpan).roundToInt().coerceAtLeast(1)
+                val page = (state.chapterFraction * (pages - 1)).roundToInt() + 1
+                Text(
+                    "Page $page of $pages in this chapter",
+                    style = Bindery.type.numeralCaption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp),
+                )
+            }
             ReaderProgressFooter(
                 progress = state.overallReadingProgress,
                 totalReadingSeconds = state.totalReadingSeconds,
@@ -624,71 +753,150 @@ private fun ReaderBottomBar(state: EpubReaderUiState, viewModel: EpubReaderViewM
     }
 }
 
+/**
+ * Auto-scroll's controls, at the foot of the page while it runs: slower, the speed,
+ * faster, pause or go on, and stop. The page holds still while the reader's controls are
+ * up, so pausing is showing them.
+ */
+@Composable
+private fun AutoScrollBar(
+    speed: Int,
+    running: Boolean,
+    insetBottom: Boolean,
+    onSpeed: (Int) -> Unit,
+    onPlay: () -> Unit,
+    onPause: () -> Unit,
+    onStop: () -> Unit,
+) {
+    ReaderBar(BarEdge.Bottom) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (insetBottom) Modifier.windowInsetsPadding(WindowInsets.navigationBars) else Modifier)
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.KeyboardDoubleArrowDown, null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+            Text("Auto-scroll", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            IconButton(onClick = { onSpeed((speed - 1).coerceAtLeast(AutoScroll.MIN_SPEED)) }, enabled = speed > AutoScroll.MIN_SPEED) {
+                Icon(Icons.Default.Remove, "Slower")
+            }
+            Text(
+                speed.toString(),
+                style = Bindery.type.numeral.copy(fontSize = 16.sp),
+                modifier = Modifier
+                    .widthIn(min = 28.dp)
+                    .semantics { contentDescription = "Speed $speed of ${AutoScroll.MAX_SPEED}" },
+            )
+            IconButton(onClick = { onSpeed((speed + 1).coerceAtMost(AutoScroll.MAX_SPEED)) }, enabled = speed < AutoScroll.MAX_SPEED) {
+                Icon(Icons.Default.Add, "Faster")
+            }
+            IconButton(onClick = if (running) onPause else onPlay) {
+                Icon(if (running) Icons.Default.Pause else Icons.Default.PlayArrow, if (running) "Pause" else "Go on")
+            }
+            IconButton(onClick = onStop) { Icon(Icons.Default.Close, "Stop auto-scroll") }
+        }
+    }
+}
+
 // ── TOC ───────────────────────────────────────────────────────────────────────
 
+/**
+ * The book's contents as it nests them: parts, chapters and sections, indented by depth.
+ * The entry being read is marked and scrolled to. A book without contents gets its
+ * chapters instead.
+ */
 @Composable
 private fun TableOfContentsPanel(
+    toc: List<TocEntry>,
     chapters: List<EpubChapter>,
     currentChapterIndex: Int,
-    onChapterSelected: (Int) -> Unit
+    onEntry: (TocEntry) -> Unit,
+    onChapter: (Int) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Text("Contents",
+    val rows = remember(toc, chapters) {
+        if (toc.isEmpty()) chapters.map { TocEntry(it.title, it.index) to 0 } else toc.flatten()
+    }
+    // The entry being read: the last one that starts at or before the open chapter.
+    val current = remember(rows, currentChapterIndex) {
+        rows.indexOfLast { it.first.chapterIndex <= currentChapterIndex }.takeIf { it >= 0 }
+            ?.let { last ->
+                // Of several entries in the same chapter, the first one is where it starts.
+                val chapter = rows[last].first.chapterIndex
+                rows.indexOfFirst { it.first.chapterIndex == chapter }
+            }
+    }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = ((current ?: 0) - 3).coerceAtLeast(0))
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "Contents",
             style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(bottom = 16.dp))
+            modifier = Modifier
+                .padding(start = 20.dp, end = 20.dp, bottom = 12.dp)
+                .semantics { heading() },
+        )
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.heightIn(max = 500.dp)
+            state = listState,
+            modifier = Modifier.heightIn(max = 560.dp),
+            contentPadding = PaddingValues(bottom = 24.dp),
         ) {
-            itemsIndexed(chapters) { index, chapter ->
-                val isCurrent = index == currentChapterIndex
-                Surface(
-                    onClick = { onChapterSelected(index) },
-                    shape = MaterialTheme.shapes.medium,
-                    color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surface,
-                    border = if (isCurrent) BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
-                    else null
+            itemsIndexed(rows) { index, (entry, depth) ->
+                val isCurrent = index == current
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                        .clickable { if (toc.isEmpty()) onChapter(entry.chapterIndex) else onEntry(entry) }
+                        .background(if (isCurrent) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent)
+                        .padding(start = 20.dp + 18.dp * depth.coerceAtMost(4), end = 20.dp, top = 10.dp, bottom = 10.dp)
+                        .semantics { if (isCurrent) stateDescription = "Reading now" },
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("${index + 1}.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.width(28.dp))
-                        Text(chapter.title,
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (isCurrent) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.weight(1f))
-                        if (isCurrent) Icon(Icons.Default.PlayArrow, null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp))
+                    Text(
+                        entry.title,
+                        style = if (depth == 0) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                        color = when {
+                            isCurrent -> MaterialTheme.colorScheme.primary
+                            depth == 0 -> MaterialTheme.colorScheme.onSurface
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (isCurrent) {
+                        Box(
+                            Modifier
+                                .padding(start = 8.dp)
+                                .size(width = 4.dp, height = 18.dp)
+                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(1.dp))
+                        )
                     }
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
     }
 }
 
 // ── Bookmarks ─────────────────────────────────────────────────────────────────
 
+/** Bookmarks in reading order, each with its chapter, its first words and its note. */
 @Composable
 internal fun EpubBookmarksPanel(
     bookmarks: List<Bookmark>,
-    currentChapterIndex: Int,
-    onJumpToChapter: (Int) -> Unit,
+    chapters: List<EpubChapter>,
+    currentBookmark: Bookmark?,
+    onOpen: (Bookmark) -> Unit,
     onDeleteBookmark: (Bookmark) -> Unit
 ) {
+    val ordered = remember(bookmarks) {
+        bookmarks.sortedWith(compareBy<Bookmark> { it.page }.thenBy { if (it.textOffset >= 0) it.textOffset.toFloat() else it.scrollFraction * 1e9f })
+    }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Text("Bookmarks",
-            style = MaterialTheme.typography.headlineSmall,
-            modifier = Modifier.padding(bottom = 16.dp))
-        if (bookmarks.isEmpty()) {
+        if (ordered.isEmpty()) {
             Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Default.BookmarkBorder, null, Modifier.size(48.dp),
@@ -700,32 +908,42 @@ internal fun EpubBookmarksPanel(
         } else {
             LazyColumn(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.heightIn(max = 400.dp)
+                contentPadding = PaddingValues(bottom = 24.dp),
+                modifier = Modifier.heightIn(max = 520.dp)
             ) {
-                items(bookmarks, key = { it.id }) { bookmark ->
-                    BinderyCard(
-                        onClick = { onJumpToChapter(bookmark.page) },
-                        selected = bookmark.page == currentChapterIndex
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp),
+                items(ordered, key = { it.id }) { bookmark ->
+                    val here = bookmark.id == currentBookmark?.id
+                    BinderyCard(onClick = { onOpen(bookmark) }, selected = here) {
+                        Row(modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Bookmark, null,
-                                tint = if (bookmark.page == currentChapterIndex)
-                                    MaterialTheme.colorScheme.primary
+                                tint = if (here) MaterialTheme.colorScheme.primary
                                 else MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(bookmark.chapterTitle ?: "Chapter ${bookmark.page + 1}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    (chapters.getOrNull(bookmark.page)?.title ?: bookmark.chapterTitle ?: "Chapter ${bookmark.page + 1}").uppercase(),
+                                    style = Bindery.type.eyebrow,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                                if (bookmark.excerpt.isNotBlank()) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        "“${bookmark.excerpt}…”",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
                                 if (bookmark.note.isNotBlank())
                                     Text(bookmark.note,
                                         style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                             IconButton(onClick = { onDeleteBookmark(bookmark) }) {
-                                Icon(Icons.Default.Delete, "Delete",
+                                Icon(Icons.Default.Delete, "Delete bookmark",
                                     tint = MaterialTheme.colorScheme.error)
                             }
                         }
@@ -733,6 +951,5 @@ internal fun EpubBookmarksPanel(
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
     }
 }

@@ -25,8 +25,16 @@ class SettingsRepositoryImpl @Inject constructor(
         // and recompose the open reader.
         .distinctUntilChanged()
 
+    /**
+     * Only the keys whose value changed are written. Writing all of them on every change
+     * made each tap rewrite the whole file, and handed every collector a "new" snapshot.
+     */
     override suspend fun editSettings(transform: (AppSettings) -> AppSettings) {
-        dataStore.edit { prefs -> prefs.write(transform(settingsFrom(prefs))) }
+        dataStore.edit { prefs ->
+            val before = settingsFrom(prefs)
+            val after = transform(before)
+            if (after != before) prefs.applyChanges(after)
+        }
     }
 
     override suspend fun setOnboardingCompleted() {
@@ -63,6 +71,13 @@ internal object SettingsKeys {
     val IS_GRID_VIEW = booleanPreferencesKey("is_grid_view")
     val ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
     val READER_SCROLL_DIRECTION = stringPreferencesKey("reader_scroll_direction")
+    val PAGED = booleanPreferencesKey("reader_paged")
+    val TWO_COLUMNS = booleanPreferencesKey("reader_two_columns")
+    val SORT_DESCENDING = booleanPreferencesKey("sort_descending")
+    val AUTO_SCROLL_SPEED = intPreferencesKey("auto_scroll_speed")
+    val READING_FOCUS = stringPreferencesKey("reading_focus")
+    val PDF_NIGHT = booleanPreferencesKey("pdf_night")
+    val PDF_CROP = booleanPreferencesKey("pdf_crop_margins")
 }
 
 /**
@@ -77,6 +92,7 @@ internal fun settingsFrom(prefs: Preferences): AppSettings {
     val legacySepia = storedTheme == LEGACY_SEPIA_APP_THEME
     val type = ReaderTypography()
     val light = ReaderLight()
+    val sort = enumOr(prefs[SettingsKeys.SORT_OPTION], SortOption.DATE_ADDED)
     return AppSettings(
         theme = if (legacySepia) AppTheme.LIGHT else enumOr(storedTheme, AppTheme.SYSTEM),
         readingTheme = enumOr(
@@ -90,6 +106,8 @@ internal fun settingsFrom(prefs: Preferences): AppSettings {
             margin = prefs[SettingsKeys.PAGE_MARGIN] ?: type.margin,
             justify = prefs[SettingsKeys.TEXT_JUSTIFY] ?: type.justify,
             hyphenate = prefs[SettingsKeys.HYPHENATE] ?: type.hyphenate,
+            paged = prefs[SettingsKeys.PAGED] ?: type.paged,
+            twoColumns = prefs[SettingsKeys.TWO_COLUMNS] ?: type.twoColumns,
         ).sanitized(),
         readerLight = ReaderLight(
             brightness = prefs[SettingsKeys.READER_BRIGHTNESS] ?: light.brightness,
@@ -109,8 +127,15 @@ internal fun settingsFrom(prefs: Preferences): AppSettings {
             val (title, url) = line.split('\t', limit = 2).takeIf { it.size == 2 } ?: return@mapNotNull null
             OpdsCatalog(title, url)
         },
-        sortOption = enumOr(prefs[SettingsKeys.SORT_OPTION], SortOption.DATE_ADDED),
+        sortOption = sort,
+        // A library sorted before the direction existed keeps the order it had.
+        sortDescending = prefs[SettingsKeys.SORT_DESCENDING] ?: sort.descendingByDefault,
         filterOption = enumOr(prefs[SettingsKeys.FILTER_OPTION], FilterOption.ALL),
+        autoScrollSpeed = (prefs[SettingsKeys.AUTO_SCROLL_SPEED] ?: AutoScroll.DEFAULT_SPEED)
+            .coerceIn(AutoScroll.MIN_SPEED, AutoScroll.MAX_SPEED),
+        readingFocus = enumOr(prefs[SettingsKeys.READING_FOCUS], ReadingFocus.OFF),
+        pdfNight = prefs[SettingsKeys.PDF_NIGHT] ?: false,
+        pdfCropMargins = prefs[SettingsKeys.PDF_CROP] ?: false,
         isGridView = prefs[SettingsKeys.IS_GRID_VIEW] ?: true,
         onboardingCompleted = prefs[SettingsKeys.ONBOARDING_COMPLETED] ?: false,
         readerScrollDirection = enumOr(
@@ -118,6 +143,20 @@ internal fun settingsFrom(prefs: Preferences): AppSettings {
         )
     )
 }
+
+/** Writes the keys of [settings] that differ from what is stored, and only those. */
+internal fun MutablePreferences.applyChanges(settings: AppSettings) {
+    val wanted = mutablePreferencesOf().also { it.write(settings) }.asMap()
+    for ((key, value) in wanted) {
+        @Suppress("UNCHECKED_CAST")
+        if (this[key] != value) this[key as Preferences.Key<Any>] = value
+    }
+    // A setting that is now unset (the sync folder) is a key to take away.
+    for (key in OptionalKeys) if (key !in wanted && contains(key)) remove(key)
+}
+
+/** Keys written only while their setting has a value. */
+private val OptionalKeys = listOf(SettingsKeys.SYNC_FOLDER)
 
 private fun MutablePreferences.write(settings: AppSettings) {
     this[SettingsKeys.THEME] = settings.theme.name
@@ -129,6 +168,8 @@ private fun MutablePreferences.write(settings: AppSettings) {
     this[SettingsKeys.PAGE_MARGIN] = type.margin
     this[SettingsKeys.TEXT_JUSTIFY] = type.justify
     this[SettingsKeys.HYPHENATE] = type.hyphenate
+    this[SettingsKeys.PAGED] = type.paged
+    this[SettingsKeys.TWO_COLUMNS] = type.twoColumns
     this[SettingsKeys.READER_BRIGHTNESS] = settings.readerLight.brightness
     this[SettingsKeys.READER_WARMTH] = settings.readerLight.warmth
     this[SettingsKeys.GOAL_MINUTES_DAY] = settings.goals.minutesPerDay
@@ -143,10 +184,15 @@ private fun MutablePreferences.write(settings: AppSettings) {
         c.title.replace(Regex("""\s"""), " ") + "\t" + c.url.trim()
     }
     this[SettingsKeys.SORT_OPTION] = settings.sortOption.name
+    this[SettingsKeys.SORT_DESCENDING] = settings.sortDescending
     this[SettingsKeys.FILTER_OPTION] = settings.filterOption.name
     this[SettingsKeys.IS_GRID_VIEW] = settings.isGridView
     this[SettingsKeys.ONBOARDING_COMPLETED] = settings.onboardingCompleted
     this[SettingsKeys.READER_SCROLL_DIRECTION] = settings.readerScrollDirection.name
+    this[SettingsKeys.AUTO_SCROLL_SPEED] = settings.autoScrollSpeed
+    this[SettingsKeys.READING_FOCUS] = settings.readingFocus.name
+    this[SettingsKeys.PDF_NIGHT] = settings.pdfNight
+    this[SettingsKeys.PDF_CROP] = settings.pdfCropMargins
 }
 
 /**

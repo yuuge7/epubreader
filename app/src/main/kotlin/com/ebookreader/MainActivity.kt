@@ -2,7 +2,6 @@ package com.ebookreader
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -20,6 +19,7 @@ import com.ebookreader.data.sync.FolderSync
 import com.ebookreader.presentation.widget.ContinueReadingWidget
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -27,6 +27,8 @@ class MainActivity : ComponentActivity() {
     private val viewModel: MainViewModel by viewModels()
 
     @Inject lateinit var folderSync: FolderSync
+    @Inject lateinit var bookRepository: com.ebookreader.domain.repository.BookRepository
+    @Inject @com.ebookreader.di.ApplicationScope lateinit var appScope: kotlinx.coroutines.CoroutineScope
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,19 +43,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-            // Handle keep screen on
-            val keepScreenOn = uiState.settings.keepScreenOn
-            DisposableEffect(keepScreenOn) {
-                if (keepScreenOn) {
-                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                } else {
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                }
-                onDispose {
-                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                }
-            }
-
+            // Keeping the screen on is the reader's business: see ReaderWindow.
             EBookReaderTheme(appTheme = uiState.settings.theme) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val startDestination = uiState.startDestination
@@ -87,8 +77,19 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         if (!isChangingConfigurations) {
             folderSync.syncInBackground()
-            // What was read just now is what the home-screen widget should show.
+            // What was read just now is what the home-screen widget should show, and the
+            // launcher's shortcuts and the Quick Settings tile with it.
             ContinueReadingWidget.refresh(this)
+            val context = applicationContext
+            appScope.launch {
+                com.ebookreader.presentation.widget.BookShortcuts.refresh(context, bookRepository)
+            }
+            runCatching {
+                android.service.quicksettings.TileService.requestListeningState(
+                    context,
+                    android.content.ComponentName(context, com.ebookreader.presentation.widget.ContinueReadingTileService::class.java),
+                )
+            }
         }
     }
 

@@ -164,6 +164,48 @@ object DatabaseModule {
         }
     }
 
+    /**
+     * v7 -> v8: what the remaining library and reader work needed.
+     *  - books.chapterLayout: EPUB chapters used to be numbered by contents entry; they
+     *    are numbered by file of the reading order now. Existing rows are marked LEGACY (1)
+     *    and their positions, bookmarks and highlights are carried across by
+     *    [com.ebookreader.data.epub.ChapterLayoutMigrator] the first time it sees them.
+     *  - books.description, contentHash, readingSettings: the detail screen, duplicate
+     *    detection by content, and settings kept per book. Filled in later, or by the user.
+     *  - books.finishedAt: when a book was finished, for the timeline. Finished books get
+     *    the last time they were read, which is when they were marked finished in practice.
+     *  - bookmarks.scrollFraction, textOffset, excerpt: several bookmarks per chapter, each
+     *    knowing its place and showing its first words. Old bookmarks point at the top.
+     *  - indices on reading_sessions.startedAt (stats summed in SQL) and books.contentHash.
+     */
+    private val MIGRATION_7_8 = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            listOf(
+                "`chapterLayout` INTEGER NOT NULL DEFAULT 1",
+                "`description` TEXT",
+                "`contentHash` TEXT",
+                "`readingSettings` TEXT",
+                "`finishedAt` INTEGER",
+            ).forEach { db.execSQL("ALTER TABLE `books` ADD COLUMN $it") }
+            db.execSQL("UPDATE `books` SET `finishedAt` = `lastRead` WHERE `readingStatus` = 'FINISHED'")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_books_contentHash` ON `books` (`contentHash`)")
+
+            listOf(
+                "`scrollFraction` REAL NOT NULL DEFAULT 0",
+                "`textOffset` INTEGER NOT NULL DEFAULT -1",
+                "`excerpt` TEXT NOT NULL DEFAULT ''",
+            ).forEach { db.execSQL("ALTER TABLE `bookmarks` ADD COLUMN $it") }
+
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_reading_sessions_startedAt` ON `reading_sessions` (`startedAt`)"
+            )
+        }
+    }
+
+    /** Every migration, in order; the database tests run them too. */
+    val ALL_MIGRATIONS: Array<Migration>
+        get() = arrayOf(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+
     /** Reads the fragments, asks [planSittingMerge] what to do, applies it. */
     private fun mergeFragmentedSittings(db: SupportSQLiteDatabase) {
         val rows = mutableListOf<SittingSpan>()
@@ -208,7 +250,7 @@ object DatabaseModule {
             AppDatabase::class.java,
             "ebook_reader_db"
         )
-            .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(*ALL_MIGRATIONS)
             // Only the pre-release schemas (1, 2) may be thrown away. Everything from v3 on
             // must migrate: a destructive fallback here deletes the user's whole library,
             // reading progress, bookmarks and stats on an app update.

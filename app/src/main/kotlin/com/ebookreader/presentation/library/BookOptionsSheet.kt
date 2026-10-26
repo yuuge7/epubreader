@@ -27,6 +27,7 @@ fun BookOptionsSheet(
     onToggleFavorite: () -> Unit,
     onAddToCollection: () -> Unit,
     onShowStats: () -> Unit,
+    onShowDetails: () -> Unit,
     onMarkAsFinished: () -> Unit,
     onMarkAsUnread: () -> Unit,
     onDelete: () -> Unit,
@@ -65,6 +66,7 @@ fun BookOptionsSheet(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
 
+            OptionItem(Icons.Default.Info, "Details", "Description, file, cover") { onShowDetails(); onDismiss() }
             OptionItem(Icons.Default.Edit, "Edit details", "Title, author and series") { onEdit(); onDismiss() }
             OptionItem(
                 if (book.isFavorite) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder,

@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt.android)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.baselineprofile)
 }
 
 // Release signing credentials live in keystore.properties, which is never committed.
@@ -50,11 +51,10 @@ android {
 
     buildTypes {
         release {
-            // TODO(A9): turn on R8 + resource shrinking. It needs keep rules verified
-            // against Room, Hilt and the PDF viewer's reflection on a real device first,
-            // so it stays off until that pass rather than shipping a build that only
-            // breaks at runtime.
-            isMinifyEnabled = false
+            // R8 shrinks, optimises and obfuscates; unused resources go too. The keep
+            // rules in proguard-rules.pro cover what is reached by name at run time.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -75,6 +75,9 @@ android {
         // Exposes VERSION_NAME so the About screen cannot drift from the real version.
         buildConfig = true
     }
+
+    // The exported Room schemas, for MigrationTestHelper.
+    sourceSets.getByName("androidTest").assets.directories.add("$projectDir/schemas")
 
     packaging {
         resources {
@@ -150,7 +153,26 @@ dependencies {
     implementation(libs.junrar)
     implementation(libs.androidx.documentfile)
 
+    // Installs the baseline profile on devices that do not get it from the Play Store.
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
+
     testImplementation(libs.junit)
     testImplementation(libs.kxml2)
     testImplementation(libs.org.json)
+
+    // On-device tests: the database migrations on a real SQLite, and the app's main
+    // screens driven through Compose.
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(libs.androidx.room.testing)
+    constraints {
+        implementation(libs.kotlinx.serialization.core) {
+            because("room-testing's schema reader needs 1.8, and the tests share the app's classpath")
+        }
+    }
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

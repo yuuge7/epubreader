@@ -23,15 +23,23 @@ An offline-first Android reader for EPUB, PDF, comics, Kindle, FB2 and text book
   OpenDyslexic, Inter Tight, or the book's own fonts. Text size follows the system font scale
 - Dark pages that stay dark: a book's own text colours, white boxes and inline styles are
   overridden, and figures are dimmed so they do not glare
-- Tap the left or right third of the page to turn it, the middle to show the controls; in
-  horizontal mode, swipe to change chapter. Turning past either end of a chapter opens the
-  next one, or the previous one at its end
+- Scroll through a chapter, or turn it page by page; in pages mode, landscape and large
+  screens show two pages side by side
+- Tap the left or right third of the page to turn it, the middle to show the controls; swipe
+  to turn pages, or to change chapter while scrolling. Turning past either end of a chapter
+  opens the next one, or the previous one at its end
+- Full screen while reading: the system bars come back with the controls
+- Auto-scroll at a speed you set, which turns pages at the same pace in pages mode
+- A reading ruler, or the paragraphs around the one being read dimmed
+- Type, layout and page colour kept for one book alone when you want
 - The chapters either side of the open one are kept loaded, so turning into them is instant
 - Progress is weighted by how much text each chapter holds, so title pages and short
   chapters no longer skew the percentage
-- Table of contents, internal link navigation and chapter scrubbing for EPUB
-- Pinch-to-zoom and page scrubbing for PDF
-- Bookmarks with optional notes
+- The book's own table of contents, nested, from the EPUB 3 navigation document or the NCX;
+  internal link navigation and chapter scrubbing
+- PDF: pinch-to-zoom, page scrubbing, a grid of page thumbnails, night pages, margins cropped
+  to the text, and the exact place in the page remembered
+- Several bookmarks per chapter, each at its exact place with its first words and a note
 - Select text to copy, share, highlight in four colours, add a note, make a quote card (a
   shareable image of the passage) or find it elsewhere in the book
 - Find in book, accent- and case-insensitive, landing on the exact occurrence
@@ -42,7 +50,9 @@ An offline-first Android reader for EPUB, PDF, comics, Kindle, FB2 and text book
   zoom into a panel, right-to-left for manga
 
 **Library**
-- Import from any file picker, or open a book directly from another app
+- Import from any file picker, a whole folder at once, or open a book directly from another
+  app. The same file under another name is recognised by its content; a file with no title
+  of its own is read as `Author - Title (Year)`
 - Formats: EPUB and PDF as they are; CBZ and CBR comics; MOBI and AZW3 (Kindle books without
   DRM), FB2, plain text and Markdown, converted to EPUB on import with their chapters,
   metadata and covers. DRM-protected Kindle books are refused with a reason
@@ -54,9 +64,12 @@ An offline-first Android reader for EPUB, PDF, comics, Kindle, FB2 and text book
   cover with the title set on it
 - Series and collections, multi-select (favourite, finish, collect, delete), and full-text
   search inside every book's text
-- Grid and list layouts, search, sort by title/author/date/last read
+- Grid and list layouts; search in the bar; sort by title, author, date added, last read,
+  progress, reading time or file size, either way round
 - Filter by format, favourites or reading status
-- A home-screen widget with the book you are reading, where you left it, and your streak
+- A details page per book: the publisher's blurb, file facts, and a cover you can replace
+- A home-screen widget with the book you are reading, where you left it, and your streak;
+  launcher shortcuts to the last three books; a Quick Settings tile that opens the current one
 
 **Design**
 - App theme: Auto, Light, Dark or Black (true black for OLED). No wallpaper-derived colour:
@@ -71,12 +84,18 @@ An offline-first Android reader for EPUB, PDF, comics, Kindle, FB2 and text book
 - Daily-minutes and books-a-year goals, with an optional evening reminder
 - Per-book stats: sittings, pace, time left and a projected finish date
 - A year-in-reading card to share
-- Monthly and yearly summaries with drill-down history
+- Monthly and yearly summaries with drill-down history, and a timeline of finished books
 - Most-read leaderboards; history is retained even after a book is removed
 - Export and import the whole history as a JSON file (Stats screen ⋮ menu), so it survives
   a reinstall or moves to a new device. Books are matched by title + author, since row ids
   mean nothing outside the device that made them; import either merges (skipping sessions
-  the device already has) or replaces the local history outright.
+  the device already has) or replaces the local history outright. Every sitting can also be
+  exported as CSV for a spreadsheet.
+
+**Backup and storage**
+- The whole library in one zip (Settings › Data): books, covers, places, bookmarks,
+  highlights, collections, history and settings. Restoring adds to what the device has
+- Settings › Data also shows the space the app uses and clears its cache
 
 **Sync**
 - Keep reading history, places and highlights in step between devices through a folder they
@@ -132,7 +151,7 @@ app/src/main/kotlin/com/ebookreader/
 │   ├── readaloud/     Text-to-speech controller and its media service
 │   ├── reminders/     The reading-goal reminder
 │   ├── sync/          Folder sync
-│   ├── backup/        Stats backup file
+│   ├── backup/        Stats backup file; the full library backup
 │   ├── local/         Room database, entities and DAOs
 │   └── repository/    Repository implementations
 ├── domain/
@@ -144,12 +163,16 @@ app/src/main/kotlin/com/ebookreader/
 │   ├── reader/pdf/    PdfRendererView-based PDF reader
 │   ├── reader/comic/  Comic reader
 │   ├── catalog/       Online catalogues
-│   ├── widget/        Home-screen widget
-│   ├── settings/      Settings
+│   ├── widget/        Home-screen widget, launcher shortcuts, Quick Settings tile
+│   ├── settings/      Settings (Reading, Library, Data, About)
 │   ├── stats/         Statistics and history
 │   └── common/        Design tokens (Bindery*), fore-edge, theme and shared helpers
 └── di/                Hilt modules
 ```
+
+`app/src/test` holds the JVM unit tests and `app/src/androidTest` the on-device ones (database
+migrations, and the app driven through its screens). `baselineprofile/` generates the baseline
+profile that release builds ship: `./gradlew :app:generateBaselineProfile` with a device connected.
 
 Architecture is MVVM over a repository layer: Compose screens observe a `StateFlow` of immutable UI state from a `ViewModel`, which talks only to repository interfaces defined in `domain`. Room and DataStore sit behind those interfaces.
 
@@ -178,7 +201,8 @@ When you change an entity:
 1. Increment `version` in `AppDatabase.kt`.
 2. Add a `Migration(old, new)` to `DatabaseModule.kt`.
 3. Build once and diff the newly generated `app/schemas/<version>.json` against your migration SQL — the `CREATE TABLE` and `CREATE INDEX` statements must match exactly, including column order and defaults.
-4. Test the upgrade on a device that already holds the previous version.
+4. Extend `MigrationTest` (`app/src/androidTest`) and run `./gradlew :app:connectedDebugAndroidTest`.
+5. Test the upgrade on a device that already holds the previous version.
 
 ## Release signing
 

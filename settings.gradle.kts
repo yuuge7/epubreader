@@ -22,3 +22,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "EBookReader"
 include(":app")
+include(":baselineprofile")

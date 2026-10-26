@@ -22,7 +22,7 @@ import com.ebookreader.data.local.entity.ReadingSessionEntity
         HighlightEntity::class, CollectionEntity::class, BookCollectionEntity::class,
         BookTextEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

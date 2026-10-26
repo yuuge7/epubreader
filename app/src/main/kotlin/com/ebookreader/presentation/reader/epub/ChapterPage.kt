@@ -12,6 +12,7 @@ import android.view.ActionMode
 import android.view.Menu
 import android.view.MenuItem
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -32,6 +33,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.delay
 import com.ebookreader.domain.model.Highlight
+import com.ebookreader.domain.model.ReadingFocus
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -71,11 +73,16 @@ internal data class PageConfig(
     val swipe: Boolean,
     val smooth: Boolean,
     val language: String?,
+    /** A screen reader is on: taps are left to it. */
+    val a11y: Boolean = false,
+    val focus: ReadingFocus = ReadingFocus.OFF,
 ) {
     fun toJson(): String = JSONObject()
         .put("swipe", swipe)
         .put("smooth", smooth)
         .put("lang", language ?: JSONObject.NULL)
+        .put("a11y", a11y)
+        .put("focus", focus.name.lowercase())
         .toString()
 }
 
@@ -90,8 +97,15 @@ enum class SelectionAction(val title: String) {
 /** Selected text, located by offsets into the chapter's text. */
 data class TextSelection(val start: Int, val end: Int, val text: String)
 
-/** Calls into a loaded page, for read-aloud. Main thread only. */
+/** Where the reader is on a page, for a bookmark: offset into the text, and the words there. */
+data class PagePlace(val offset: Int, val text: String, val fraction: Float)
+
+/** Calls into a loaded page. Main thread only. */
 interface PageHandle {
+    /** Where the top of the screen is, and the first words there. */
+    fun place(callback: (PagePlace?) -> Unit)
+    /** A page forwards (1) or back (-1), as a tap on that side would. */
+    fun turn(direction: Int)
     /** The text at the top of the page, for read-aloud to start from; "" if none. */
     fun firstVisibleText(callback: (String) -> Unit)
     /**
@@ -107,7 +121,8 @@ internal interface PageEvents {
     fun onTap(zone: Int): Boolean
     fun onEdge(direction: Int)
     fun onSwipe(direction: Int)
-    fun onScroll(fraction: Float)
+    /** [span] is how much of the chapter one screen shows. */
+    fun onScroll(fraction: Float, span: Float)
     fun onInternalLink(path: String, fragment: String?)
     fun onHighlightTapped(id: Long)
     fun onSelection(action: SelectionAction, selection: TextSelection)
@@ -142,6 +157,8 @@ internal fun ChapterPage(
     highlights: List<Highlight>,
     assets: WebViewAssetLoader,
     paper: Color,
+    /** Auto-scroll speed in CSS pixels a second, 0 for none; runs on the active page only. */
+    autoScroll: Float,
     events: PageEvents,
     onReady: (PageHandle) -> Unit,
     modifier: Modifier = Modifier,
@@ -178,6 +195,9 @@ internal fun ChapterPage(
         }
         webView?.evaluateJavascript("__reader.paintHighlights($list)", null)
     }
+    LaunchedEffect(ready, active, autoScroll) {
+        if (ready) webView?.evaluateJavascript("__reader.setAutoScroll(${if (active) autoScroll else 0f})", null)
+    }
     LaunchedEffect(ready, position) {
         val wv = webView ?: return@LaunchedEffect
         if (!ready || position == null) return@LaunchedEffect
@@ -185,7 +205,7 @@ internal fun ChapterPage(
             is PagePosition.Fraction -> "__reader.goTo(${p.value.coerceIn(0f, 1f)})"
             is PagePosition.Anchor -> "__reader.goToAnchor(${JSONObject.quote(p.id)})"
             is PagePosition.Search -> "__reader.findText(${JSONObject.quote(p.query)}, ${p.occurrence})"
-            is PagePosition.TextOffset -> "__reader.goToOffset(${p.offset})"
+            is PagePosition.TextOffset -> "__reader.goToOffset(${p.offset}, ${p.atTop})"
         }
         wv.evaluateJavascript(js, null)
         latestEvents.onPositionApplied(position.id)
@@ -195,9 +215,15 @@ internal fun ChapterPage(
         factory = { context ->
             ReaderWebView(context).also { wv ->
                 webView = wv
+                // A WebView whose height is WRAP_CONTENT (an AndroidView's default) tells
+                // the page its viewport is 0 tall: 100vh is 0 and paged mode lays out
+                // nothing. The view always fills its slot, so say so.
+                wv.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 // In debug builds the page script's errors reach logcat; otherwise a
                 // broken reader action fails with no trace at all.
                 if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                    // Debug builds only: lets chrome://inspect look at the page.
+                    WebView.setWebContentsDebuggingEnabled(true)
                     wv.webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(message: ConsoleMessage): Boolean {
                             Log.d("ReaderPage", "${message.message()} (line ${message.lineNumber()})")
@@ -241,7 +267,7 @@ internal fun ChapterPage(
                     }
 
                     override fun onPageFinished(view: WebView, url: String) {
-                        view.evaluateJavascript(ReaderScript + "\n__reader.tagAlignment();", null)
+                        view.evaluateJavascript(ReaderScript + "\n__reader.tagAlignment();__reader.semantics();", null)
                         if (!ready) {
                             ready = true
                             latestOnReady(WebViewPageHandle(view))
@@ -270,8 +296,8 @@ internal fun ChapterPage(
                     }
 
                     @JavascriptInterface
-                    fun scrollProgress(fraction: Float) {
-                        wv.post { if (isActive) latestEvents.onScroll(fraction) }
+                    fun scrollProgress(fraction: Float, span: Float) {
+                        wv.post { if (isActive) latestEvents.onScroll(fraction, span) }
                     }
                 }, "Android")
                 wv.loadDataWithBaseURL(
@@ -283,6 +309,8 @@ internal fun ChapterPage(
             // Paint the view itself in the page colour, so the gap while a chapter loads
             // is the page and not a white flash.
             wv.setBackgroundColor(paper.toArgb())
+            // Zooming out of a paged chapter would show the pages either side of this one.
+            wv.settings.setSupportZoom(!css.contains(PAGED_MARKER))
             wv.visibility = if (active) View.VISIBLE else View.INVISIBLE
             wv.importantForAccessibility = if (active) View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
             else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
@@ -302,6 +330,19 @@ private fun parseSelection(json: String?): TextSelection? = runCatching {
 }.getOrNull()
 
 private class WebViewPageHandle(private val view: WebView) : PageHandle {
+    override fun place(callback: (PagePlace?) -> Unit) {
+        view.evaluateJavascript("__reader.place()") { json ->
+            callback(runCatching {
+                val o = JSONObject(json)
+                PagePlace(o.getInt("offset"), o.getString("text"), o.getDouble("fraction").toFloat())
+            }.getOrNull())
+        }
+    }
+
+    override fun turn(direction: Int) {
+        view.evaluateJavascript("__reader.turn($direction)", null)
+    }
+
     override fun firstVisibleText(callback: (String) -> Unit) {
         view.evaluateJavascript("__reader.firstVisibleText()") { json ->
             callback(runCatching { JSONArray("[$json]").getString(0) }.getOrDefault(""))

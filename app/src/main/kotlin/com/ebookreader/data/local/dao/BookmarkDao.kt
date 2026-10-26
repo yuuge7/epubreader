@@ -18,6 +18,18 @@ interface BookmarkDao {
     @Delete
     suspend fun deleteBookmark(bookmark: BookmarkEntity)
 
+    @Update
+    suspend fun updateBookmark(bookmark: BookmarkEntity)
+
     @Query("SELECT COUNT(*) FROM bookmarks WHERE bookId = :bookId AND page = :page")
     suspend fun isPageBookmarked(bookId: Long, page: Int): Int
+
+    @Query("SELECT * FROM bookmarks WHERE bookId = :bookId")
+    suspend fun getForBookOnce(bookId: Long): List<BookmarkEntity>
+
+    @Query("UPDATE bookmarks SET page = :page WHERE id = :id")
+    suspend fun setPage(id: Long, page: Int)
+
+    @Query("SELECT * FROM bookmarks")
+    suspend fun getAllOnce(): List<BookmarkEntity>
 }

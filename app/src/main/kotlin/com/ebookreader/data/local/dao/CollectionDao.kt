@@ -42,4 +42,10 @@ interface CollectionDao {
 
     @Query("DELETE FROM book_collections WHERE collectionId = :collectionId AND bookId IN (:bookIds)")
     suspend fun removeBooks(collectionId: Long, bookIds: List<Long>)
+
+    @Query("SELECT * FROM collections")
+    suspend fun getAllOnce(): List<CollectionEntity>
+
+    @Query("SELECT * FROM book_collections")
+    suspend fun getLinksOnce(): List<BookCollectionEntity>
 }

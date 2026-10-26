@@ -3,10 +3,13 @@ package com.ebookreader.data.library
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.documentfile.provider.DocumentFile
 import com.ebookreader.data.epub.EpubParser
 import com.ebookreader.di.ApplicationScope
 import com.ebookreader.domain.model.Book
 import com.ebookreader.domain.model.BookFormat
+import com.ebookreader.domain.model.ChapterLayout
+import com.ebookreader.domain.model.FileNameMetadata
 import com.ebookreader.domain.repository.BookRepository
 import com.ebookreader.domain.repository.BookTextSearch
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -17,6 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.InputStream
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -65,6 +69,7 @@ data class ConvertedBook(
     val seriesIndex: Float? = null,
     /** Pages, where the format has them before it is opened (comics). */
     val totalPages: Int = 0,
+    val description: String? = null,
 )
 
 /**
@@ -102,6 +107,11 @@ class BookImporter @Inject constructor(
 
     private val booksDir: File get() = File(context.filesDir, "books").also { it.mkdirs() }
 
+    private companion object {
+        /** Folders inside the picked one that are looked into: a library, not a whole drive. */
+        const val MAX_FOLDER_DEPTH = 4
+    }
+
     /** Imports from a content or file URI, as given by the picker or another app. */
     suspend fun import(uri: Uri, onProgress: (Float) -> Unit = {}): Result = withContext(Dispatchers.IO) {
         val resolver = context.contentResolver
@@ -119,6 +129,54 @@ class BookImporter @Inject constructor(
             null
         } ?: return@withContext Result.Failed("Could not read $fileName")
         input.use { importStream(it, fileName, kind, totalBytes, onProgress) }
+    }
+
+    /** What a folder import brought in. */
+    data class FolderOutcome(val imported: Int, val alreadyThere: Int, val failed: Int, val found: Int) {
+        val message: String
+            get() = when {
+                found == 0 -> "No books in that folder"
+                else -> buildList {
+                    add(if (imported == 1) "1 book added" else "$imported books added")
+                    if (alreadyThere > 0) add("$alreadyThere already in your library")
+                    if (failed > 0) add("$failed could not be read")
+                }.joinToString(", ")
+            }
+    }
+
+    /**
+     * Imports every file in [tree] (a folder picked with the system's folder picker) that is
+     * in a format the library takes, in subfolders too, a few levels down.
+     *
+     * @param onProgress files done, files found, and how far into the current one.
+     */
+    suspend fun importFolder(tree: Uri, onProgress: (done: Int, total: Int, file: Float) -> Unit): FolderOutcome {
+        val files = withContext(Dispatchers.IO) {
+            val root = DocumentFile.fromTreeUri(context, tree) ?: return@withContext emptyList()
+            val found = mutableListOf<DocumentFile>()
+            fun walk(dir: DocumentFile, depth: Int) {
+                dir.listFiles().sortedBy { it.name?.lowercase() }.forEach { f ->
+                    when {
+                        f.isDirectory && depth < MAX_FOLDER_DEPTH -> walk(f, depth + 1)
+                        f.isFile && SourceKind.detect(f.name.orEmpty(), f.type) != null -> found += f
+                    }
+                }
+            }
+            runCatching { walk(root, 0) }
+            found
+        }
+        var imported = 0
+        var already = 0
+        var failed = 0
+        files.forEachIndexed { i, file ->
+            onProgress(i, files.size, 0f)
+            when (import(file.uri) { p -> onProgress(i, files.size, p) }) {
+                is Result.Imported -> imported++
+                is Result.AlreadyImported -> already++
+                else -> failed++
+            }
+        }
+        return FolderOutcome(imported, already, failed, files.size)
     }
 
     /** Imports a file already on the device, a catalogue download for example. */
@@ -142,19 +200,42 @@ class BookImporter @Inject constructor(
 
         val staging = if (direct) dest else File(context.cacheDir, "import_${System.nanoTime()}_$fileName")
         try {
-            copyWithProgress(input, staging, totalBytes, onProgress)
+            val digest = MessageDigest.getInstance("SHA-256")
+            copyWithProgress(input, staging, totalBytes, onProgress, digest)
+            // The same file under another name, or from another folder, is the same book.
+            val hash = digest.hex()
+            bookRepository.getBookByContentHash(hash)?.let { existing ->
+                dest.delete()
+                return Result.AlreadyImported(existing)
+            }
             val found = if (direct) describe(dest, kind) else converters.convert(kind, staging, fileName, dest)
+            val baseName = fileName.substringBeforeLast(".")
+            // A file without a title or author of its own may still say them in its name.
+            val fromName = FileNameMetadata.parse(fileName)
+            // Converters fall back to the file name for a book without a title; a book that
+            // comes as it is says its title itself, even when the file is named after it.
+            val ownTitle = found.title?.takeIf {
+                it.isNotBlank() && (direct || (it != baseName && it != FileNameMetadata.stem(fileName)))
+            }
+            val ownAuthor = found.author?.takeIf {
+                it.isNotBlank() && !it.equals("Unknown Author", ignoreCase = true) && !it.equals("Unknown", ignoreCase = true)
+            }
+            val nameSeries = fromName?.series?.takeIf { ownTitle == null && found.series == null }
             val book = Book(
-                title = found.title?.takeIf { it.isNotBlank() } ?: fileName.substringBeforeLast("."),
-                author = found.author?.takeIf { it.isNotBlank() } ?: "Unknown Author",
+                title = ownTitle ?: fromName?.title ?: baseName,
+                author = ownAuthor ?: fromName?.author ?: "Unknown Author",
                 filePath = found.file.absolutePath,
                 format = found.format,
                 coverPath = found.coverPath,
                 totalPages = found.totalPages,
                 fileSize = found.file.length(),
-                series = found.series,
-                seriesIndex = found.seriesIndex,
+                series = found.series ?: nameSeries,
+                seriesIndex = found.seriesIndex ?: fromName?.seriesIndex?.takeIf { nameSeries != null },
                 sourceFormat = if (direct) null else kind.label,
+                // Empty rather than null: looked for, and there was none.
+                description = found.description.orEmpty(),
+                contentHash = hash,
+                chapterLayout = ChapterLayout.CURRENT,
             )
             val id = bookRepository.insertBook(book)
             if (book.format == BookFormat.EPUB) appScope.launch { textSearch.indexBook(id) }
@@ -180,9 +261,10 @@ class BookImporter @Inject constructor(
                 format = BookFormat.EPUB,
                 title = meta.title.takeIf { it != "Unknown Title" },
                 author = meta.author,
-                coverPath = meta.coverImagePath?.let { coverMaker.keepCover(it, file.name) },
+                coverPath = meta.coverImage?.let { coverMaker.imageCover(it, file.name) },
                 series = meta.series,
                 seriesIndex = meta.seriesIndex,
+                description = meta.description,
             )
         }
         SourceKind.PDF -> ConvertedBook(file, BookFormat.PDF, title = null, author = null, coverPath = coverMaker.pdfCover(file))

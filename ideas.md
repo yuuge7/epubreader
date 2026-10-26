@@ -471,7 +471,7 @@ R7–R10 (selection, highlights, search, quote cards), T1–T6 (stats with actua
 **Phase 6 — reach**
 R11 (TTS), F1 (formats), F3 (OPDS), T13 (sync), F7 (widget).
 
-Phases 1 to 6 are done.
+Phases 1 to 6 are done, and so is everything in §9.
 
 Tests (A7) and CI (A8) are not a phase; add them alongside whichever phase touches the code they
 would cover, starting with `EpubParser` in Phase 3.
@@ -480,60 +480,74 @@ would cover, starting with `EpubParser` in Phase 3.
 
 ## 9. Remaining
 
-Everything still planned, and nothing else. Items from the lists above that are neither done nor
-here were dropped.
+Nothing. Everything that was planned here was done on 2026-10-26; what each item became is noted
+below, so it can be checked. Items from the lists above that are not here were dropped.
 
 **Library**
-- **L3** — Cleaner top bar: search inline, everything else in one menu.
-- **L11** — Sort by progress, reading time or file size, with an ascending/descending toggle.
-- **L12** — Book detail screen: description, full metadata, replace the cover, file info.
-- **F2** — Import a whole folder at once.
-- **F4** — Spot duplicates by file content, not by file name.
-- **F12** — Read title and author from file names like `Author - Title (Year)`.
-- **F13** — Pick your own cover image for a book that has none.
+- **L3** — Done. The search field sits in the bar itself; sort, view, folder import, catalogues,
+  stats and settings are in one menu.
+- **L11** — Done. Progress, reading time and file size join the sort keys; picking the current key
+  again, or "Reverse order", turns it around. Ties go A to Z, ignoring a leading "The".
+- **L12** — Done. Book details: blurb (from `dc:description`), progress, file facts, replace or
+  reset the cover, stats, mark finished/unread, its own reading settings, remove.
+- **F2** — Done. "Import a folder" walks a picked folder (four levels down) and says what came in.
+- **F4** — Done. Every import is hashed (SHA-256) while it is copied; the same file under any name
+  is "already in your library". Books from before are hashed in the background.
+- **F12** — Done. `Author - Title (Year)` and `Author - Series 03 - Title`, used only when the book
+  has no title or author of its own.
+- **F13** — Done. From the details screen: choose a cover with the photo picker, or go back to
+  the book's own or a plain one.
 
 **Reader**
-- **R4** — Page-by-page mode (real pages instead of scrolling).
-- **R12** — Auto-scroll with a speed control.
-- **R13** — Reading settings saved per book.
-- **R16** — Nested table of contents.
-- **R17** — Table of contents for EPUB 3 books, plus the fix for Gutenberg books showing
-  "Chapter N" (the NCX `<item>` with `media-type` before `href` is not found). Both change
-  chapter indices that saved positions, bookmarks and highlights key on, so they need a
-  position migration first.
-- **R18** — Full-screen mode: system bars only show with the controls.
-- **R20** — "Keep screen on" only while reading (today it applies everywhere in the app).
-- **R21** — Two-column layout in landscape and on tablets.
-- **R22** — Several bookmarks per chapter, each showing a text excerpt.
-- **R23** — Reading ruler, or dimming the paragraphs around the one you're reading.
+- **R4** — Done. Pages mode lays the chapter out in screen-wide CSS columns; taps and swipes
+  turn pages, "Page 3 of 12 in this chapter" in the bar.
+- **R12** — Done. Auto-scroll from the reader's menu, speed 1–20; in pages mode it turns pages
+  at the same pace. A finger on the page holds it; it carries on into the next chapter.
+- **R13** — Done. "Only for this book" in the Aa sheet keeps type, layout and page colour per book.
+- **R16, R17** — Done. Chapters are the spine's files; the contents are read from the EPUB 3 nav
+  document or the NCX (found in any attribute order), nested, with fragments. Saved places,
+  bookmarks and highlights are carried over by `ChapterLayoutMigrator` (DB v8), and so are the
+  places in old backups and sync files.
+- **R18** — Done. System bars show only with the controls; the page keeps its size either way.
+- **R20** — Done. "Keep the screen on" applies in the readers only.
+- **R21** — Done. In pages mode, two columns in landscape and on wide screens (switchable).
+- **R22** — Done. Several bookmarks per chapter, each at its exact place with its first words.
+- **R23** — Done. Reading focus: a ruler band, or everything but the paragraph at the reading
+  line dimmed; the line is dragged by a tab at the edge.
 
 **PDF**
-- **P3** — Save the position within a page, not just the page number.
-- **P5** — Grid of page thumbnails to jump around.
-- **P6** — Night mode (inverted pages).
-- **P7** — Crop margins.
+- **P3** — Done. The place within the page is saved and restored.
+- **P5** — Done. "All pages" opens a grid of thumbnails, bookmarked pages marked.
+- **P6** — Done. Night pages: a colour filter that maps paper and ink to the Night theme.
+- **P7** — Done. Crop margins zooms to the text's width, measured over a few pages.
 
 **Stats, settings and system**
-- **T7** — Timeline of finished books.
-- **T8** — CSV export.
-- **T10** — Split Settings into Reading / Library / Data / About.
-- **T11** — Storage screen showing space used, with a "clear cache" button.
-- **T12** — Full backup and restore: library, progress, bookmarks, highlights and settings in one
-  file.
-- **F8** — Quick Settings tile that opens the current book.
-- **F6** — App shortcuts for the last three books.
+- **T7** — Done. Finished books on a timeline by year (books now record `finishedAt`).
+- **T8** — Done. Every sitting as CSV from the stats menu.
+- **T10** — Done. Settings: Reading, Library, Data, About.
+- **T11** — Done. Data › Storage: books, covers, database, unpacked books, other cache; clear cache.
+- **T12** — Done. Data › Backup: one zip with books, covers, places, bookmarks, highlights,
+  collections, history and settings; restoring adds to the library on the device.
+- **F8** — Done. A Quick Settings tile that opens the book being read.
+- **F6** — Done. Launcher shortcuts for the last three books, with their covers.
 
 **Under the hood**
-- **A1** — Settings save only the value that changed, not every key.
-- **A3, A4** — Faster book opening and import (no full parse just to read title and cover).
-- **A5** — Stats that stay fast with a long reading history.
-- **A7** — On-device UI tests.
-- **A9** — Shrink the release build (R8).
-- **A10** — Faster cold start (baseline profile).
+- **A1** — Done. A settings edit writes only the keys whose value changed.
+- **A3, A4** — Done. Chapters are read when shown (a few kept), weights measured once in the
+  background; import reads title, author, cover, series and blurb from the zip without unpacking.
+- **A5** — Done. Stats are summed per day in SQL (`startedAt` indexed); months and years from that.
+- **A7** — Done. `app/src/androidTest`: Room migrations v4–v8 on the device, and the app driven
+  through settings and a book opened from outside.
+- **A9** — Done. R8 and resource shrinking on: the release APK went from ~15 MB to ~5 MB.
+- **A10** — Done. `:baselineprofile` generates the profile (`./gradlew :app:generateBaselineProfile`);
+  profileinstaller installs it.
 
 **Accessibility**
-- **X3** — Screen-reader labels that say each toggle's state (on/off).
-- **X4** — Every tap target at least 48 dp.
-- **X5** — Make sure the page's tap handler doesn't get in the way of links and screen readers.
-- **X6** — Proper headings in chapter text for screen readers.
-- **X8** — Honour the system's reduced-motion setting.
+- **X3** — Done. Toggles say their state (bookmark, favourite, night pages, crop, read aloud, ...).
+- **X4** — Done. Collection chips, highlight inks and the import options row are 48 dp targets.
+- **X5** — Done. With a screen reader on, the page's tap zones stand aside, the controls stay,
+  and page and chapter turns are offered as actions.
+- **X6** — Done. Paragraphs styled as headings get the heading role; images without a description
+  are marked as decoration.
+- **X8** — Done. With animations off, screens change without moving and the page does not
+  scroll smoothly or fade.

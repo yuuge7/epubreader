@@ -9,12 +9,15 @@ import java.time.ZoneId
  * Reading time by calendar day: the basis of the heat map, the streaks, the weekly and
  * monthly bars and the daily goal. A sitting counts on the day it began.
  */
-class ReadingCalendar(sessions: List<ReadingSession>, private val zone: ZoneId = ZoneId.systemDefault()) {
-
+class ReadingCalendar(
     /** Seconds read on each day that has any reading. */
-    val secondsByDay: Map<LocalDate, Long> = sessions
-        .groupBy { Instant.ofEpochMilli(it.startedAt.time).atZone(zone).toLocalDate() }
-        .mapValues { (_, day) -> day.sumOf { it.durationSeconds } }
+    val secondsByDay: Map<LocalDate, Long>,
+) {
+    constructor(sessions: List<ReadingSession>, zone: ZoneId = ZoneId.systemDefault()) : this(
+        sessions
+            .groupBy { Instant.ofEpochMilli(it.startedAt.time).atZone(zone).toLocalDate() }
+            .mapValues { (_, day) -> day.sumOf { it.durationSeconds } }
+    )
 
     fun secondsOn(day: LocalDate): Long = secondsByDay[day] ?: 0L
 

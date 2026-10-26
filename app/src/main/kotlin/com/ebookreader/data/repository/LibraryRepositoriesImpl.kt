@@ -1,5 +1,6 @@
 package com.ebookreader.data.repository
 
+import com.ebookreader.data.epub.ChapterLayoutMigrator
 import com.ebookreader.data.epub.EpubParser
 import com.ebookreader.data.epub.visibleText
 import com.ebookreader.data.local.dao.BookDao
@@ -73,44 +74,49 @@ class CollectionRepositoryImpl @Inject constructor(
 }
 
 /**
- * The full-text index, in an FTS4 table. Each chapter file is indexed once, under the
- * first contents entry that points to it, so a file listed by several entries does not
- * show up once per entry.
+ * The full-text index, in an FTS4 table, one row per chapter file. A file the spine lists
+ * twice is indexed once, under its first chapter.
  */
 @Singleton
 class BookTextSearchImpl @Inject constructor(
     private val bookDao: BookDao,
     private val textDao: BookTextDao,
     private val epubParser: EpubParser,
+    private val layouts: ChapterLayoutMigrator,
 ) : BookTextSearch {
 
-    /** One book at a time: indexing parses the whole book into memory. */
+    /** One book at a time: indexing reads the whole book. */
     private val indexing = Mutex()
 
-    override suspend fun indexBook(bookId: Long) = indexing.withLock {
-        val book = bookDao.getBookById(bookId)?.toDomain() ?: return@withLock
+    override suspend fun indexBook(bookId: Long) {
+        // Rows are stored by chapter number, so the numbering must be the current one.
+        layouts.ensureCurrent(bookId)
+        indexing.withLock { index(bookId) }
+    }
+
+    private suspend fun index(bookId: Long) {
+        val book = bookDao.getBookById(bookId)?.toDomain() ?: return
         if (book.format != BookFormat.EPUB) {
             bookDao.setTextIndexed(bookId, true)
-            return@withLock
+            return
         }
         val parsed = withContext(Dispatchers.IO) {
             runCatching {
                 val result = epubParser.parseAndExtract(book.filePath)
-                val seen = HashSet<String>()
-                val rows = result.book.chapters.mapIndexedNotNull { index, chapter ->
-                    val path = result.chapterPaths[chapter.id] ?: return@mapIndexedNotNull null
-                    if (!seen.add(path)) return@mapIndexedNotNull null
-                    val text = visibleText(result.chapterContents.getValue(chapter.id))
-                    if (text.isBlank()) null else BookTextEntity(bookId = bookId, chapterIndex = index, content = text)
+                val rows = ArrayList<BookTextEntity>()
+                // One pass over the files: the index's text and the chapters' weights.
+                val weights = result.readChapters { index, html ->
+                    val text = visibleText(html)
+                    if (text.isNotBlank()) rows += BookTextEntity(bookId = bookId, chapterIndex = index, content = text)
                 }
-                rows to result.chapterWeights
+                rows to weights
             }.getOrNull()
         }
         // bookId is not an indexed column of the FTS table, so this delete reads the whole
         // index: only worth it for a book that is in there.
         if (book.textIndexed) textDao.deleteForBook(bookId)
         parsed?.let { (rows, weights) ->
-            textDao.insertAll(rows)
+            if (rows.isNotEmpty()) textDao.insertAll(rows)
             // Measured here too, so "time left" is known before the book is first opened.
             bookDao.updateTextMetrics(bookId, weights.sum(), weights.toColumn())
         }

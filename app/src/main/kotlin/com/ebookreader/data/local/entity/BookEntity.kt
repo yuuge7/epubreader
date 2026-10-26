@@ -2,13 +2,16 @@ package com.ebookreader.data.local.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.ebookreader.domain.model.Book
 import com.ebookreader.domain.model.BookFormat
+import com.ebookreader.domain.model.ChapterLayout
 import com.ebookreader.domain.model.ReadingStatus
 import java.util.Date
 
-@Entity(tableName = "books")
+// contentHash: an import looks for the same file under any name.
+@Entity(tableName = "books", indices = [Index("contentHash")])
 data class BookEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -48,6 +51,17 @@ data class BookEntity(
     /** Whether the book's text is in the full-text index. */
     @ColumnInfo(defaultValue = "0")
     val textIndexed: Boolean = false,
+    /**
+     * How the chapters are numbered (see [ChapterLayout]). Rows from before v8 are
+     * [ChapterLayout.LEGACY] until their positions are carried over; new books start current.
+     */
+    @ColumnInfo(defaultValue = "1")
+    val chapterLayout: Int = ChapterLayout.CURRENT,
+    val description: String? = null,
+    val contentHash: String? = null,
+    /** [BookReadingSettings] as JSON; null follows the app's settings. */
+    val readingSettings: String? = null,
+    val finishedAt: Long? = null,
 ) {
     fun toDomain() = Book(
         id = id, title = title, author = author,
@@ -63,6 +77,11 @@ data class BookEntity(
         series = series, seriesIndex = seriesIndex,
         sourceFormat = sourceFormat,
         textIndexed = textIndexed,
+        chapterLayout = chapterLayout,
+        description = description,
+        contentHash = contentHash,
+        readingSettings = ReadingSettingsCodec.decode(readingSettings),
+        finishedAt = finishedAt?.let { Date(it) },
     )
 
     companion object {
@@ -82,6 +101,11 @@ data class BookEntity(
             series = book.series, seriesIndex = book.seriesIndex,
             sourceFormat = book.sourceFormat,
             textIndexed = book.textIndexed,
+            chapterLayout = book.chapterLayout,
+            description = book.description,
+            contentHash = book.contentHash,
+            readingSettings = ReadingSettingsCodec.encode(book.readingSettings),
+            finishedAt = book.finishedAt?.time,
         )
     }
 }

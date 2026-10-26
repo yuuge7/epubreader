@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
@@ -61,6 +62,7 @@ import java.io.File
  */
 @Composable
 fun ComicReaderScreen(
+    keepScreenOn: Boolean,
     rightToLeft: Boolean,
     onToggleDirection: () -> Unit,
     onNavigateBack: () -> Unit,
@@ -72,6 +74,7 @@ fun ComicReaderScreen(
         onPause = viewModel::onScreenPaused,
         elapsed = viewModel::currentSessionSeconds,
     )
+    com.ebookreader.presentation.reader.ReaderWindow(keepScreenOn = keepScreenOn, showSystemBars = uiState.showControls)
 
     Box(Modifier.fillMaxSize().background(Bindery.colors.paper)) {
         val book = uiState.book
@@ -181,7 +184,10 @@ private fun BoxScope.ComicPages(
                         if (sessionSeconds > 0) SessionClock(sessionSeconds)
                     }
                 }
-                IconButton(onClick = onToggleDirection) {
+                IconButton(
+                    onClick = onToggleDirection,
+                    modifier = Modifier.semantics { stateDescription = if (rightToLeft) "Right to left" else "Left to right" },
+                ) {
                     Icon(
                         Icons.Default.SwapHoriz,
                         if (rightToLeft) "Pages turn right to left. Switch to left to right"
@@ -189,7 +195,10 @@ private fun BoxScope.ComicPages(
                         tint = if (rightToLeft) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     )
                 }
-                IconButton(onClick = viewModel::markAsFinished) {
+                IconButton(
+                    onClick = viewModel::markAsFinished,
+                    modifier = Modifier.semantics { stateDescription = if (isFinished) "Finished" else "Not finished" },
+                ) {
                     Icon(
                         Icons.Default.CheckCircle, "Mark as finished",
                         tint = if (isFinished) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,

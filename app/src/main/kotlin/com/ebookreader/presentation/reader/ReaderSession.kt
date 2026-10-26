@@ -51,3 +51,63 @@ fun rememberSittingSeconds(onResume: () -> Unit, onPause: () -> Unit, elapsed: (
     }
     return seconds
 }
+
+/**
+ * The window while a book is open. The status and navigation bars show only with the
+ * reader's own controls, so the page has the whole screen; a swipe from the edge still
+ * brings them back for a moment. The screen stays awake if the reader asked for that,
+ * and only here: the library and settings let it sleep as usual.
+ */
+@Composable
+fun ReaderWindow(keepScreenOn: Boolean, showSystemBars: Boolean) {
+    val window = androidx.activity.compose.LocalActivity.current?.window ?: return
+    DisposableEffect(window, keepScreenOn) {
+        val flag = android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        if (keepScreenOn) window.addFlags(flag)
+        onDispose { window.clearFlags(flag) }
+    }
+    val controller = remember(window) {
+        androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+    }
+    val bars = androidx.core.view.WindowInsetsCompat.Type.systemBars()
+    LaunchedEffect(controller, showSystemBars) {
+        controller.systemBarsBehavior =
+            androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (showSystemBars) controller.show(bars) else controller.hide(bars)
+    }
+    DisposableEffect(controller) {
+        onDispose { controller.show(bars) }
+    }
+}
+
+/**
+ * Whether a screen reader is exploring by touch. The page's tap zones then stand aside:
+ * a double tap to activate lands in the middle of whatever was focused and would turn
+ * the page or hide the controls instead.
+ */
+@Composable
+fun rememberTouchExploration(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val manager = remember(context) {
+        context.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as android.view.accessibility.AccessibilityManager
+    }
+    var exploring by remember { androidx.compose.runtime.mutableStateOf(manager.isTouchExplorationEnabled) }
+    DisposableEffect(manager) {
+        val listener = android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener { exploring = it }
+        manager.addTouchExplorationStateChangeListener(listener)
+        onDispose { manager.removeTouchExplorationStateChangeListener(listener) }
+    }
+    return exploring
+}
+
+/** The system's "remove animations": animator duration scale set to zero. */
+@Composable
+fun rememberReducedMotion(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember(context) { reducedMotion(context) }
+}
+
+fun reducedMotion(context: android.content.Context): Boolean =
+    android.provider.Settings.Global.getFloat(
+        context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f
+    ) == 0f

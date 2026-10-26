@@ -53,6 +53,7 @@ object StatsBackupCodec {
                     put("lastRead", book.lastRead)
                     put("totalReadingSeconds", book.totalReadingSeconds)
                     put("positionLabel", book.positionLabel)
+                    put("chapterLayout", book.chapterLayout)
                 }
             )
         }
@@ -86,6 +87,7 @@ object StatsBackupCodec {
                         put("note", h.note)
                         put("color", h.color)
                         put("createdAt", h.createdAt)
+                        put("chapterLayout", h.chapterLayout)
                     }
                 )
             }
@@ -139,6 +141,7 @@ object StatsBackupCodec {
                 lastRead = if (obj.isNull("lastRead")) null else obj.optLong("lastRead"),
                 totalReadingSeconds = obj.optLong("totalReadingSeconds", 0L),
                 positionLabel = if (obj.isNull("positionLabel")) null else obj.optString("positionLabel").ifBlank { null },
+                chapterLayout = if (obj.has("chapterLayout")) obj.optInt("chapterLayout") else null,
             )
         }.filter { it.title.isNotBlank() }
 
@@ -168,6 +171,7 @@ object StatsBackupCodec {
                 note = obj.optString("note"),
                 color = obj.optString("color", "YELLOW"),
                 createdAt = obj.optLong("createdAt", 0L),
+                chapterLayout = if (obj.has("chapterLayout")) obj.optInt("chapterLayout") else null,
             )
         }.filter { it.bookTitle.isNotBlank() && it.chapterIndex >= 0 && it.endOffset > it.startOffset && it.startOffset >= 0 }
 
